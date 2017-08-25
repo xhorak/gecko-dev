@@ -26,10 +26,21 @@ static GtkStyleContext*
 GetCssNodeStyleInternal(WidgetNodeType aNodeType);
 
 static GtkWidget*
-CreateWindowWidget()
+CreateWindowWidget(WidgetNodeType type)
 {
   GtkWidget *widget = gtk_window_new(GTK_WINDOW_POPUP);
   gtk_widget_set_name(widget, "MozillaGtkWidget");
+  GtkStyleContext* style = gtk_widget_get_style_context(widget);
+  switch (type) {
+  case MOZ_GTK_WINDOW_CSD:
+    gtk_style_context_add_class(style, "csd");
+    break;
+  case MOZ_GTK_WINDOW_SOLID_CSD:
+    gtk_style_context_add_class(style, "solid-csd");
+    break;
+  default:
+    break;
+  }
   return widget;
 }
 
@@ -101,7 +112,7 @@ CreateTooltipWidget()
 {
   MOZ_ASSERT(gtk_check_version(3, 20, 0) != nullptr,
              "CreateTooltipWidget should be used for Gtk < 3.20 only.");
-  GtkWidget* widget = CreateWindowWidget();
+  GtkWidget* widget = CreateWindowWidget(MOZ_GTK_WINDOW);
   GtkStyleContext* style = gtk_widget_get_style_context(widget);
   gtk_style_context_add_class(style, GTK_STYLE_CLASS_TOOLTIP);
   return widget;
@@ -529,11 +540,103 @@ CreateNotebookWidget()
 }
 
 static GtkWidget*
+CreateHeaderBar(bool aMaximized)
+{
+  MOZ_ASSERT(gtk_check_version(3, 10, 0) == nullptr,
+             "GtkHeaderBar is only available on GTK 3.10+.");
+
+  static auto sGtkHeaderBarNewPtr = (GtkWidget* (*)())
+    dlsym(RTLD_DEFAULT, "gtk_header_bar_new");
+  static const char* MOZ_GTK_STYLE_CLASS_TITLEBAR = "titlebar";
+
+  GtkWidget* widget = sGtkHeaderBarNewPtr();
+  AddToWindowContainer(widget);
+
+  GtkStyleContext* style = gtk_widget_get_style_context(widget);
+  gtk_style_context_add_class(style, MOZ_GTK_STYLE_CLASS_TITLEBAR);
+  // "default-decoration" is a selector for widgets in titlebar
+  gtk_style_context_add_class(style, "default-decoration");
+
+  if (aMaximized) {
+    // TODO - is enough to set "maximized" on title bar widget
+    // or do we need to add "maximized" to window container?
+    gtk_style_context_add_class(style, "maximized");
+  }
+
+  return widget;
+}
+
+static GtkWidget*
+CreateHeaderBarButton(WidgetNodeType aWidgetType)
+{
+  static const char* MOZ_GTK_STYLE_CLASS_TITLEBUTTON = "titlebutton";
+
+  GtkWidget* widget = gtk_button_new();
+  gtk_container_add(GTK_CONTAINER(GetWidget(MOZ_GTK_HEADER_BAR)), widget);
+
+  GtkStyleContext* style = gtk_widget_get_style_context(widget);
+  gtk_style_context_add_class(style, MOZ_GTK_STYLE_CLASS_TITLEBUTTON);
+
+  switch (aWidgetType) {
+    case MOZ_GTK_HEADER_BAR_BUTTON_CLOSE:
+      gtk_style_context_add_class(style, "close");
+      break;
+    case MOZ_GTK_HEADER_BAR_BUTTON_MINIMIZE:
+      gtk_style_context_add_class(style, "minimize");
+      break;
+    case MOZ_GTK_HEADER_BAR_BUTTON_MAXIMIZE:
+      gtk_style_context_add_class(style, "maximize");
+      break;
+    default:
+      break;
+  }
+
+  return widget;
+}
+/*
+
+static GtkWidget*
+CreateHeaderBar()
+{
+  MOZ_ASSERT(gtk_check_version(3, 10, 0) == nullptr,
+             "GtkHeaderBar is only available on GTK 3.10+.");
+ 
+  static auto sGtkHeaderBarNewPtr = (GtkWidget* (*)())
+    dlsym(RTLD_DEFAULT, "gtk_header_bar_new");
+  static const char* MOZ_GTK_STYLE_CLASS_TITLEBAR = "titlebar";
+ 
+  GtkWidget* widget = sGtkHeaderBarNewPtr();
+  AddToWindowContainer(widget);
+   
+  GtkStyleContext* style = gtk_widget_get_style_context(widget);
+  gtk_style_context_add_class(style, MOZ_GTK_STYLE_CLASS_TITLEBAR);
+ 
+  return widget;
+}
+
+static GtkWidget*
+CreateHeaderBarButton()
+{
+  static const char* MOZ_GTK_STYLE_CLASS_TITLEBUTTON = "titlebutton";
+
+  GtkWidget* widget = gtk_button_new();
+  gtk_container_add(GTK_CONTAINER(GetWidget(MOZ_GTK_HEADER_BAR)), widget);
+
+  GtkStyleContext* style = gtk_widget_get_style_context(widget);
+  gtk_style_context_add_class(style, MOZ_GTK_STYLE_CLASS_TITLEBUTTON);
+
+  return widget;
+}
+*/
+
+static GtkWidget*
 CreateWidget(WidgetNodeType aWidgetType)
 {
   switch (aWidgetType) {
     case MOZ_GTK_WINDOW:
-      return CreateWindowWidget();
+    case MOZ_GTK_WINDOW_CSD:
+    case MOZ_GTK_WINDOW_SOLID_CSD:
+      return CreateWindowWidget(aWidgetType);
     case MOZ_GTK_WINDOW_CONTAINER:
       return CreateWindowContainerWidget();
     case MOZ_GTK_CHECKBUTTON_CONTAINER:
@@ -610,6 +713,13 @@ CreateWidget(WidgetNodeType aWidgetType)
       return CreateComboBoxEntryButtonWidget();
     case MOZ_GTK_COMBOBOX_ENTRY_ARROW:
       return CreateComboBoxEntryArrowWidget();
+    case MOZ_GTK_HEADER_BAR:
+    case MOZ_GTK_HEADER_BAR_MAXIMIZED:
+      return CreateHeaderBar(aWidgetType == MOZ_GTK_HEADER_BAR_MAXIMIZED);
+    case MOZ_GTK_HEADER_BAR_BUTTON_CLOSE:
+    case MOZ_GTK_HEADER_BAR_BUTTON_MINIMIZE:
+    case MOZ_GTK_HEADER_BAR_BUTTON_MAXIMIZE:
+      return CreateHeaderBarButton(aWidgetType);
     default:
       /* Not implemented */
       return nullptr;
@@ -1045,6 +1155,14 @@ GetCssNodeStyleInternal(WidgetNodeType aNodeType)
       GtkWidget* widget = GetWidget(MOZ_GTK_NOTEBOOK);
       return gtk_widget_get_style_context(widget);
     }
+    case MOZ_GTK_WINDOW_DECORATION:
+      style = CreateChildCSSNode("decoration",
+                                 MOZ_GTK_WINDOW_CSD);
+      break;
+    case MOZ_GTK_WINDOW_DECORATION_SOLID:
+      style = CreateChildCSSNode("decoration",
+                                 MOZ_GTK_WINDOW_SOLID_CSD);
+      break;
     default:
       return GetWidgetRootStyle(aNodeType);
   }
@@ -1219,6 +1337,11 @@ GtkStyleContext*
 ClaimStyleContext(WidgetNodeType aNodeType, GtkTextDirection aDirection,
                   GtkStateFlags aStateFlags, StyleFlags aFlags)
 {
+  GtkWidget* window = GetWidget(MOZ_GTK_WINDOW);
+  GtkStyleContext* windowStyle = gtk_widget_get_style_context(window);
+  if (aFlags & MOZ_WINDOW_MAXIMIZED)
+    gtk_style_context_add_class(windowStyle, "maximized");
+
   GtkStyleContext* style;
   if (gtk_check_version(3, 20, 0) != nullptr) {
     style = GetWidgetStyleInternal(aNodeType);
@@ -1276,4 +1399,7 @@ ClaimStyleContext(WidgetNodeType aNodeType, GtkTextDirection aDirection,
 void
 ReleaseStyleContext(GtkStyleContext* aStyleContext)
 {
+  GtkWidget* window = GetWidget(MOZ_GTK_WINDOW);
+  GtkStyleContext* style = gtk_widget_get_style_context(window);
+  gtk_style_context_remove_class(style, "maximized");
 }

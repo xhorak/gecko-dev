@@ -458,11 +458,7 @@ pref("browser.tabs.opentabfor.middleclick", true);
 pref("browser.tabs.loadDivertedInBackground", false);
 pref("browser.tabs.loadBookmarksInBackground", false);
 pref("browser.tabs.tabClipWidth", 140);
-#ifdef UNIX_BUT_NOT_MAC
-pref("browser.tabs.drawInTitlebar", false);
-#else
 pref("browser.tabs.drawInTitlebar", true);
-#endif
 
 // false - disable the tabbar session restore button
 // true - enable the tabbar session restore button

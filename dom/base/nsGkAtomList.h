@@ -2250,6 +2250,7 @@ GK_ATOM(touch_enabled, "touch-enabled")
 GK_ATOM(menubar_drag, "menubar-drag")
 GK_ATOM(swipe_animation_enabled, "swipe-animation-enabled")
 GK_ATOM(physical_home_button, "physical-home-button")
+GK_ATOM(gtk_csd_available, "gtk-csd-available")
 
 // windows theme selector metrics
 GK_ATOM(windows_classic, "windows-classic")
@@ -2286,6 +2287,7 @@ GK_ATOM(_moz_device_orientation, "-moz-device-orientation")
 GK_ATOM(_moz_is_resource_document, "-moz-is-resource-document")
 GK_ATOM(_moz_swipe_animation_enabled, "-moz-swipe-animation-enabled")
 GK_ATOM(_moz_physical_home_button, "-moz-physical-home-button")
+GK_ATOM(_moz_gtk_csd_available, "-moz-gtk-csd-available")
 
 // application commands
 GK_ATOM(Back, "Back")

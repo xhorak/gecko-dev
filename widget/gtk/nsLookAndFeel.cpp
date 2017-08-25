@@ -866,6 +866,9 @@ nsLookAndFeel::GetIntImpl(IntID aID, int32_t &aResult)
     case eIntID_ContextMenuOffsetHorizontal:
         aResult = 2;
         break;
+    case eIntID_GTKCSDAvailable:
+        aResult = sCSDAvailable;
+        break;
     default:
         aResult = 0;
         res     = NS_ERROR_FAILURE;
@@ -1479,6 +1482,11 @@ nsLookAndFeel::EnsureInit()
                          nullptr);
 
     gtk_widget_destroy(window);
+
+    // Require GTK 3.20 for client-side decoration support.
+    // 3.20 exposes gtk_render_background_get_clip, which is required for
+    // calculating shadow metrics for decorated windows.
+    sCSDAvailable = gtk_check_version(3, 20, 0) == nullptr;
 }
 
 // virtual
