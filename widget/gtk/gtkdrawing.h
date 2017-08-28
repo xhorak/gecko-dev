@@ -103,6 +103,11 @@ typedef enum {
   MOZ_GTK_TAB_SELECTED        = 1 << 10
 } GtkTabFlags;
 
+// Flags used when drawing window decorations.
+typedef enum {
+  MOZ_GTK_CSD_MAXIMIZED = 1 << 1
+} GtkCSDFlags;
+
 /*** result/error codes ***/
 #define MOZ_GTK_SUCCESS 0
 #define MOZ_GTK_UNKNOWN_WIDGET -1
@@ -270,6 +275,14 @@ typedef enum {
   MOZ_GTK_WINDOW,
   /* Window container for all widgets */
   MOZ_GTK_WINDOW_CONTAINER,
+  /* Window with the 'csd' style class. */
+  MOZ_GTK_WINDOW_CSD,
+  /* Window with the 'csd' style class. */
+  MOZ_GTK_WINDOW_SOLID_CSD,
+  /* Client-side window decoration node. Available on GTK 3.20+. */
+  MOZ_GTK_WINDOW_DECORATION,
+  /* Solid client-side window decoration node. Available on GTK 3.20+. */
+  MOZ_GTK_WINDOW_DECORATION_SOLID,
   /* Paints a GtkInfoBar, for notifications. */
   MOZ_GTK_INFO_BAR,
   /* Used for widget tree construction. */
@@ -290,6 +303,17 @@ typedef enum {
   MOZ_GTK_COMBOBOX_ENTRY_ARROW,
   /* Used for scrolled window shell. */
   MOZ_GTK_SCROLLED_WINDOW,
+  /* Paints a GtkHeaderBar */
+  MOZ_GTK_HEADER_BAR,
+  /* Paints a GtkHeaderBar in maximized state */
+  MOZ_GTK_HEADER_BAR_MAXIMIZED,
+  /* Paints a GtkHeaderBar title buttons */
+  MOZ_GTK_HEADER_BAR_BUTTON_CLOSE,
+  MOZ_GTK_HEADER_BAR_BUTTON_MINIMIZE,
+  MOZ_GTK_HEADER_BAR_BUTTON_MAXIMIZE,
+
+  /* Paints a GtkHeaderBar title button */
+  MOZ_GTK_HEADER_BAR_BUTTON,
 
   MOZ_GTK_WIDGET_NODE_COUNT
 } WidgetNodeType;
@@ -541,6 +565,15 @@ gint moz_gtk_get_menu_separator_height(gint* size);
  * returns:    MOZ_GTK_SUCCESS if there was no error, an error code otherwise
  */
 gint moz_gtk_splitter_get_metrics(gint orientation, gint* size);
+
+#if (MOZ_WIDGET_GTK == 3)
+/**
+ * Gets the margins to be used for window decorations, typically the extra space
+ * required to draw a drop shadow (obtained from gtk_render_background_get_clip).
+ * Only available on GTK 3.20+.
+ */
+void moz_gtk_get_window_border(gint* top, gint* right, gint* bottom, gint* left);
+#endif
 
 /**
  * Get the YTHICKNESS of a tab (notebook extension).

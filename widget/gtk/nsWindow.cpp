@@ -85,6 +85,7 @@
 #include "nsIPropertyBag2.h"
 #include "GLContext.h"
 #include "gfx2DGlue.h"
+#include "nsLookAndFeel.h"
 
 #ifdef ACCESSIBILITY
 #include "mozilla/a11y/Accessible.h"
@@ -138,6 +139,8 @@ using namespace mozilla::widget;
 #include <dlfcn.h>
 
 #include "mozilla/layers/APZCTreeManager.h"
+
+#include "gtkdrawing.h"
 
 using namespace mozilla;
 using namespace mozilla::gfx;
@@ -480,6 +483,7 @@ nsWindow::nsWindow()
     mLastScrollEventTime = GDK_CURRENT_TIME;
 #endif
     mPendingConfigures = 0;
+    mDrawsInTitlebar = false;
 }
 
 nsWindow::~nsWindow()
@@ -2586,6 +2590,39 @@ nsWindow::OnMotionNotifyEvent(GdkEventMotion *aEvent)
     }
 #endif /* MOZ_X11 */
 
+    GdkWindowEdge edge;
+    if (CheckResizerEdge(GetRefPoint(this, aEvent), edge)) {
+        nsCursor cursor = eCursor_none;
+        switch (edge) {
+        case GDK_WINDOW_EDGE_NORTH:
+            cursor = eCursor_n_resize;
+            break;
+        case GDK_WINDOW_EDGE_NORTH_WEST:
+            cursor = eCursor_nw_resize;
+            break;
+        case GDK_WINDOW_EDGE_NORTH_EAST:
+            cursor = eCursor_ne_resize;
+            break;
+        case GDK_WINDOW_EDGE_WEST:
+            cursor = eCursor_w_resize;
+            break;
+        case GDK_WINDOW_EDGE_EAST:
+            cursor = eCursor_e_resize;
+            break;
+        case GDK_WINDOW_EDGE_SOUTH:
+            cursor = eCursor_s_resize;
+            break;
+        case GDK_WINDOW_EDGE_SOUTH_WEST:
+            cursor = eCursor_sw_resize;
+            break;
+        case GDK_WINDOW_EDGE_SOUTH_EAST:
+            cursor = eCursor_se_resize;
+            break;
+        }
+        SetCursor(cursor);
+        return;
+    }
+
     WidgetMouseEvent event(true, eMouseMove, this, WidgetMouseEvent::eReal);
 
     gdouble pressure = 0;
@@ -2754,6 +2791,15 @@ nsWindow::OnButtonPressEvent(GdkEventButton *aEvent)
     // check to see if we should rollup
     if (CheckForRollup(aEvent->x_root, aEvent->y_root, false, false))
         return;
+
+    // Check to see if the event is within our window's resize region
+    GdkWindowEdge edge;
+    if (CheckResizerEdge(GetRefPoint(this, aEvent), edge)) {
+        gdk_window_begin_resize_drag(mGdkWindow, edge, aEvent->button,
+                                     aEvent->x_root, aEvent->y_root,
+                                     aEvent->time);
+        return;
+    }
 
     gdouble pressure = 0;
     gdk_event_get_axis ((GdkEvent*)aEvent, GDK_AXIS_PRESSURE, &pressure);
@@ -3340,6 +3386,8 @@ nsWindow::OnWindowStateEvent(GtkWidget *aWidget, GdkEventWindowState *aEvent)
 #endif //ACCESSIBILITY
     }
 
+    UpdateClientShadowWidth();
+
     if (mWidgetListener) {
       mWidgetListener->SizeModeChanged(mSizeState);
       if (aEvent->changed_mask & GDK_WINDOW_STATE_FULLSCREEN) {
@@ -3404,6 +3452,7 @@ nsWindow::OnCompositedChanged()
       presShell->ThemeChanged();
     }
   }
+  UpdateClientShadowWidth();
 }
 
 void
@@ -3642,6 +3691,7 @@ nsWindow::Create(nsIWidget* aParent,
         bool useAlphaVisual = (mWindowType == eWindowType_popup &&
                                aInitData->mSupportTranslucency);
 
+//        bool useAlphaVisual = aInitData->mSupportTranslucency;
         // mozilla.widget.use-argb-visuals is a hidden pref defaulting to false
         // to allow experimentation
         if (Preferences::GetBool("mozilla.widget.use-argb-visuals", false))
@@ -6575,6 +6625,37 @@ nsWindow::ClearCachedResources()
     }
 }
 
+NS_IMETHODIMP
+nsWindow::SetNonClientMargins(LayoutDeviceIntMargin &aMargins)
+{
+  SetDrawsInTitlebar(aMargins.top == 0);
+  return NS_OK;
+}  
+
+void
+nsWindow::SetDrawsInTitlebar(bool aState)
+{
+  if (aState == mDrawsInTitlebar)
+    return;
+
+  int32_t isCSDAvailable = -1;
+  nsresult rv = LookAndFeel::GetInt(LookAndFeel::eIntID_GTKCSDAvailable,
+                                    &isCSDAvailable);
+  if (NS_FAILED(rv) || !isCSDAvailable) {
+    NS_WARNING("Client side decorations unsupported, ignoring.");
+    return;
+  }
+
+  if (mShell) {
+    NS_WARNING("gtk_window_set_decorated may not have any effect when called on a window that is already visible.");
+    gtk_window_set_decorated(GTK_WINDOW(mShell), !aState);
+  }
+   
+  mDrawsInTitlebar = aState;
+
+  UpdateClientShadowWidth();
+}
+
 gint
 nsWindow::GdkScaleFactor()
 {
@@ -6844,6 +6925,93 @@ nsWindow::SynthesizeNativeTouchPoint(uint32_t aPointerId,
   return NS_OK;
 }
 #endif
+
+bool
+nsWindow::IsClientDecorated() const
+{
+    return mDrawsInTitlebar;
+}
+
+int
+nsWindow::GetClientResizerSize()
+{
+  if (!mShell)
+    return 0;
+
+  // GTK uses a default size of 20px as of 3.20.
+  gint size = 20;
+  gtk_widget_style_get(mShell, "decoration-resize-handle", &size, nullptr);
+
+  return GdkCoordToDevicePixels(size);
+}
+
+void
+nsWindow::UpdateClientShadowWidth()
+{
+  if (gtk_check_version(3, 12, 0) != nullptr)
+    return;
+
+  // Shadows are only used for normal, non-solid client windows with CSD.
+  gint top = 0, right = 0, bottom = 0, left = 0;
+  if (IsClientDecorated() && IsComposited() && mSizeState == nsSizeMode_Normal) {
+    moz_gtk_get_window_border(&top, &right, &bottom, &left);
+  }
+
+  static auto sGdkWindowSetShadowWidth =
+    (void (*)(GdkWindow*, gint, gint, gint, gint))
+    dlsym(RTLD_DEFAULT, "gdk_window_set_shadow_width");
+  sGdkWindowSetShadowWidth(mGdkWindow, left, right, top, bottom);
+}
+
+bool
+nsWindow::CheckResizerEdge(LayoutDeviceIntPoint aPoint, GdkWindowEdge& aOutEdge)
+{
+  // We only need to handle resizers when using CSD.
+  if (!IsClientDecorated())
+    return false;
+
+  // Don't allow resizing maximized windows.
+  if (mSizeState != nsSizeMode_Normal)
+    return false;
+
+  gint left, top, right, bottom;
+  WidgetNodeType type = IsComposited() ? MOZ_GTK_WINDOW_DECORATION
+                                       : MOZ_GTK_WINDOW_DECORATION_SOLID;
+  Unused << moz_gtk_get_widget_border(type, &left, &top, &right, &bottom,
+                                      GTK_TEXT_DIR_LTR);
+  gint scale = GdkScaleFactor();
+  left *= scale;
+  top *= scale;
+  right *= scale;
+  bottom *= scale;
+
+  int resizerSize = GetClientResizerSize();
+  int topDist = aPoint.y;
+  int leftDist = aPoint.x;
+  int rightDist = mBounds.width - aPoint.x;
+  int bottomDist = mBounds.height - aPoint.y;
+
+  if (leftDist <= resizerSize && topDist <= resizerSize) {
+    aOutEdge = GDK_WINDOW_EDGE_NORTH_WEST;
+  } else if (rightDist <= resizerSize && topDist <= resizerSize) {
+    aOutEdge = GDK_WINDOW_EDGE_NORTH_EAST;
+  } else if (leftDist <= resizerSize && bottomDist <= resizerSize) {
+    aOutEdge = GDK_WINDOW_EDGE_SOUTH_WEST;
+  } else if (rightDist <= resizerSize && bottomDist <= resizerSize) {
+    aOutEdge = GDK_WINDOW_EDGE_SOUTH_EAST;
+  } else if (topDist <= top) {
+    aOutEdge = GDK_WINDOW_EDGE_NORTH;
+  } else if (leftDist <= left) {
+    aOutEdge = GDK_WINDOW_EDGE_WEST;
+  } else if (rightDist <= right) {
+    aOutEdge = GDK_WINDOW_EDGE_EAST;
+  } else if (bottomDist <= bottom) {
+    aOutEdge = GDK_WINDOW_EDGE_SOUTH;
+  } else {
+    return false;
+  }
+  return true;
+}
 
 int32_t
 nsWindow::RoundsWidgetCoordinatesTo()

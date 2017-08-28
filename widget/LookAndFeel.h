@@ -393,6 +393,12 @@ public:
      eIntID_PhysicalHomeButton,
 
      /*
+      * A boolean value indicating whether client-side decorations are
+      * supported by the user's GTK version.
+      */
+     eIntID_GTKCSDAvailable,
+
+     /*
       * Controls whether overlay scrollbars display when the user moves
       * the mouse in a scrollable frame.
       */

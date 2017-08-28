@@ -1180,6 +1180,12 @@ nsCSSRuleProcessor::InitSystemMetrics()
     sSystemMetrics->AppendElement(nsGkAtoms::physical_home_button);
   }
 
+  rv = LookAndFeel::GetInt(LookAndFeel::eIntID_GTKCSDAvailable,
+                           &metricResult);
+  if (NS_SUCCEEDED(rv) && metricResult) {
+    sSystemMetrics->AppendElement(nsGkAtoms::gtk_csd_available);
+  }
+
 #ifdef XP_WIN
   if (NS_SUCCEEDED(
         LookAndFeel::GetInt(LookAndFeel::eIntID_WindowsThemeIdentifier,

@@ -123,6 +123,7 @@ public:
                                          double aHeight,
                                          bool   aRepaint) override;
     virtual bool       IsEnabled() const override;
+    bool               IsComposited() const;
 
     void               SetZIndex(int32_t aZIndex) override;
     virtual void       SetSizeMode(nsSizeMode aMode) override;
@@ -351,6 +352,9 @@ public:
 #endif
     virtual void GetCompositorWidgetInitData(mozilla::widget::CompositorWidgetInitData* aInitData) override;
 
+    NS_IMETHOD SetNonClientMargins(LayoutDeviceIntMargin& aMargins) override;
+    void SetDrawsInTitlebar(bool aState) override;
+
     // HiDPI scale conversion
     gint GdkScaleFactor();
 
@@ -383,6 +387,18 @@ protected:
                                       GtkWidget* aOldContainer);
 
     virtual void RegisterTouchWindow() override;
+
+    // Decorations
+    bool IsClientDecorated() const;
+    int GetClientResizerSize();
+
+    // Informs the window manager about the size of the shadows surrounding
+    // a client-side decorated window.
+    void UpdateClientShadowWidth();
+
+    // Returns true if the given point (in device pixels) is within a resizer
+    // region of the window. Only used when drawing decorations client side.
+    bool CheckResizerEdge(LayoutDeviceIntPoint aPoint, GdkWindowEdge& aOutEdge);
 
     nsCOMPtr<nsIWidget> mParent;
     // Is this a toplevel window?
@@ -432,7 +448,6 @@ private:
                                    gint* aRootX, gint* aRootY);
     void               ClearCachedResources();
     nsIWidgetListener* GetListener();
-    bool               IsComposited() const;
 
 
     GtkWidget          *mShell;
@@ -535,6 +550,9 @@ private:
     // Remember the last sizemode so that we can restore it when
     // leaving fullscreen
     nsSizeMode         mLastSizeMode;
+
+    // If true, draw our own window decorations (where supported).
+    bool mDrawsInTitlebar;
 
     static bool DragInProgress(void);
 

@@ -788,6 +788,15 @@ nsMediaFeatures::features[] = {
     GetSystemMetric
   },
 
+  {
+    &nsGkAtoms::_moz_gtk_csd_available,
+    nsMediaFeature::eMinMaxNotAllowed,
+    nsMediaFeature::eBoolInteger,
+    nsMediaFeature::eNoRequirements,
+    { &nsGkAtoms::gtk_csd_available },
+    GetSystemMetric
+  },
+
   // Internal -moz-is-glyph media feature: applies only inside SVG glyphs.
   // Internal because it is really only useful in the user agent anyway
   //  and therefore not worth standardizing.

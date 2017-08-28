@@ -31,6 +31,8 @@ public:
     virtual void RefreshImpl();
     virtual char16_t GetPasswordCharacterImpl();
     virtual bool GetEchoPasswordImpl();
+    
+    bool IsCSDAvailable() const { return sCSDAvailable; }
 
 protected:
 #if (MOZ_WIDGET_GTK == 2)
@@ -83,6 +85,7 @@ protected:
     char16_t sInvisibleCharacter;
     float   sCaretRatio;
     bool    sMenuSupportsDrag;
+    bool    sCSDAvailable;
     bool    mInitialized;
 
     void EnsureInit();

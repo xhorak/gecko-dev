@@ -15,7 +15,8 @@
 typedef unsigned StyleFlags;
 enum : StyleFlags {
   NO_STYLE_FLAGS,
-  WHATEVER_MIGHT_BE_NEEDED = 1U << 0,
+  /* Sets the "maximized" style class on the window. */
+  MOZ_WINDOW_MAXIMIZED = 1U << 0,
 };
 
 GtkWidget*
