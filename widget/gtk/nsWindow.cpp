@@ -3691,7 +3691,6 @@ nsWindow::Create(nsIWidget* aParent,
         bool useAlphaVisual = (mWindowType == eWindowType_popup &&
                                aInitData->mSupportTranslucency);
 
-//        bool useAlphaVisual = aInitData->mSupportTranslucency;
         // mozilla.widget.use-argb-visuals is a hidden pref defaulting to false
         // to allow experimentation
         if (Preferences::GetBool("mozilla.widget.use-argb-visuals", false))
@@ -3807,12 +3806,13 @@ nsWindow::Create(nsIWidget* aParent,
 #if (MOZ_WIDGET_GTK == 3)
         // "csd" style is set when widget is realized so we need to call
         // it explicitly now.
-        gtk_widget_realize(mShell);
+        //gtk_widget_realize(mShell);
 
         // We can't draw directly to top-level window when client side
         // decorations are enabled. We use container with GdkWindow instead.
         GtkStyleContext* style = gtk_widget_get_style_context(mShell);
         shellHasCSD = gtk_style_context_has_class(style, "csd");
+        fprintf(stderr, "shellHasCSD = %d\n", shellHasCSD);
 #endif
         if (!shellHasCSD) {
             // Use mShell's window for drawing and events.
@@ -6975,8 +6975,11 @@ nsWindow::CheckResizerEdge(LayoutDeviceIntPoint aPoint, GdkWindowEdge& aOutEdge)
     return false;
 
   gint left, top, right, bottom;
+/*
   WidgetNodeType type = IsComposited() ? MOZ_GTK_WINDOW_DECORATION
                                        : MOZ_GTK_WINDOW_DECORATION_SOLID;
+*/
+  WidgetNodeType type = MOZ_GTK_WINDOW_DECORATION_SOLID;
   Unused << moz_gtk_get_widget_border(type, &left, &top, &right, &bottom,
                                       GTK_TEXT_DIR_LTR);
   gint scale = GdkScaleFactor();
@@ -7038,7 +7041,11 @@ nsWindow::IsComposited() const
   }
 
   GdkScreen* gdkScreen = gdk_screen_get_default();
+  return gdk_screen_is_composited(gdkScreen);
+
+  /*
   return gdk_screen_is_composited(gdkScreen) &&
          (gdk_window_get_visual(mGdkWindow)
             == gdk_screen_get_rgba_visual(gdkScreen));
+         */
 }
