@@ -188,6 +188,8 @@ static gboolean expose_event_cb           (GtkWidget *widget,
 #else
 static gboolean expose_event_cb           (GtkWidget *widget,
                                            cairo_t *rect);
+static gboolean expose_event_decoration_draw_cb (GtkWidget *widget,
+                                                cairo_t *cr);
 #endif
 static gboolean configure_event_cb        (GtkWidget *widget,
                                            GdkEventConfigure *event);
@@ -442,6 +444,7 @@ nsWindow::nsWindow()
 
     mContainer           = nullptr;
     mGdkWindow           = nullptr;
+    mShadowGdkWindow     = nullptr;
     mShell               = nullptr;
     mCompositorWidgetDelegate = nullptr;
     mHasMappedToplevel   = false;
@@ -483,7 +486,7 @@ nsWindow::nsWindow()
     mLastScrollEventTime = GDK_CURRENT_TIME;
 #endif
     mPendingConfigures = 0;
-    mDrawsInTitlebar = false;
+    mDrawWindowDecoration = false;
 }
 
 nsWindow::~nsWindow()
@@ -2795,7 +2798,7 @@ nsWindow::OnButtonPressEvent(GdkEventButton *aEvent)
     // Check to see if the event is within our window's resize region
     GdkWindowEdge edge;
     if (CheckResizerEdge(GetRefPoint(this, aEvent), edge)) {
-        gdk_window_begin_resize_drag(mGdkWindow, edge, aEvent->button,
+        gdk_window_begin_resize_drag(mShadowGdkWindow, edge, aEvent->button,
                                      aEvent->x_root, aEvent->y_root,
                                      aEvent->time);
         return;
@@ -3641,7 +3644,12 @@ nsWindow::Create(nsIWidget* aParent,
     GtkWindow      *topLevelParent = nullptr;
     nsWindow       *parentnsWindow = nullptr;
     GtkWidget      *eventWidget = nullptr;
-    bool            shellHasCSD = false;
+    // When CSD is available we emulate it for toplevel windows.
+    // Content is rendered to container and decoration to mShell.
+    bool            drawToContainer = gtk_check_version(3, 20, 0) == nullptr &&
+                    aInitData->mWindowType == eWindowType_toplevel;
+
+    mDrawWindowDecoration = drawToContainer;
 
     if (aParent) {
         parentnsWindow = static_cast<nsWindow*>(aParent);
@@ -3689,7 +3697,8 @@ nsWindow::Create(nsIWidget* aParent,
         mShell = gtk_window_new(type);
 
         bool useAlphaVisual = (mWindowType == eWindowType_popup &&
-                               aInitData->mSupportTranslucency);
+                               aInitData->mSupportTranslucency) ||
+                               drawToContainer;
 
         // mozilla.widget.use-argb-visuals is a hidden pref defaulting to false
         // to allow experimentation
@@ -3804,23 +3813,31 @@ nsWindow::Create(nsIWidget* aParent,
         mContainer = MOZ_CONTAINER(container);
 
 #if (MOZ_WIDGET_GTK == 3)
-        // "csd" style is set when widget is realized so we need to call
-        // it explicitly now.
-        gtk_widget_realize(mShell);
+        // TODO: Do we need that? popups/tooltips are rendered without
+        // decorations so they always have "csd" disabled.
+        if (!drawToContainer) {
+            // "csd" style is set when widget is realized so we need to call
+            // it explicitly now.
+            gtk_widget_realize(mShell);
 
-        // We can't draw directly to top-level window when client side
-        // decorations are enabled. We use container with GdkWindow instead.
-        GtkStyleContext* style = gtk_widget_get_style_context(mShell);
-        shellHasCSD = gtk_style_context_has_class(style, "csd");
+            // We can't draw directly to top-level window when client side
+            // decorations are enabled. We use container with GdkWindow instead.
+            GtkStyleContext* style = gtk_widget_get_style_context(mShell);
+            drawToContainer = gtk_style_context_has_class(style, "csd");
+        }
 #endif
-        if (!shellHasCSD) {
-            // Use mShell's window for drawing and events.
-            gtk_widget_set_has_window(container, FALSE);
+        if (drawToContainer) {
+            gtk_widget_set_app_paintable(GTK_WIDGET(mContainer), TRUE);
+        } else {
             // Prevent GtkWindow from painting a background to flicker.
             gtk_widget_set_app_paintable(mShell, TRUE);
+
+            // Use mShell's window for drawing and events.
+            gtk_widget_set_has_window(container, FALSE);
         }
+
         // Set up event widget
-        eventWidget = shellHasCSD ? container : mShell;
+        eventWidget = drawToContainer ? container : mShell;
         gtk_widget_add_events(eventWidget, kEvents);
 
         gtk_container_add(GTK_CONTAINER(mShell), container);
@@ -3832,6 +3849,18 @@ nsWindow::Create(nsIWidget* aParent,
 
         // the drawing window
         mGdkWindow = gtk_widget_get_window(eventWidget);
+        if (drawToContainer) {
+            mShadowGdkWindow = gtk_widget_get_window(mShell);
+            if (mDrawWindowDecoration) {
+                UpdateClientShadowWidth();
+                gtk_widget_set_margin_left(GTK_WIDGET(mContainer), mWindowDecorationSize.left);
+                gtk_widget_set_margin_right(GTK_WIDGET(mContainer), mWindowDecorationSize.right);
+                gtk_widget_set_margin_top(GTK_WIDGET(mContainer), mWindowDecorationSize.top);
+                gtk_widget_set_margin_bottom(GTK_WIDGET(mContainer), mWindowDecorationSize.bottom);
+                gtk_window_set_decorated(GTK_WINDOW(mShell), false);
+                gtk_widget_set_app_paintable(mShell, TRUE);
+            }
+        }
 
         if (mWindowType == eWindowType_popup) {
             // gdk does not automatically set the cursor for "temporary"
@@ -3965,6 +3994,10 @@ nsWindow::Create(nsIWidget* aParent,
 #else
         g_signal_connect(G_OBJECT(mContainer), "draw",
                          G_CALLBACK(expose_event_cb), nullptr);
+        if (mDrawWindowDecoration) {
+            g_signal_connect(G_OBJECT(mShell), "draw",
+                            G_CALLBACK(expose_event_decoration_draw_cb), nullptr);
+        }
 #endif
         g_signal_connect(mContainer, "focus_in_event",
                          G_CALLBACK(focus_in_event_cb), nullptr);
@@ -3991,7 +4024,7 @@ nsWindow::Create(nsIWidget* aParent,
                          G_CALLBACK(drag_data_received_event_cb), nullptr);
 
         GtkWidget *widgets[] = { GTK_WIDGET(mContainer),
-                                 !shellHasCSD ? mShell : nullptr };
+                                 !drawToContainer ? mShell : nullptr };
         for (size_t i = 0; i < ArrayLength(widgets) && widgets[i]; ++i) {
             // Visibility events are sent to the owning widget of the relevant
             // window but do not propagate to parent widgets so connect on
@@ -5572,6 +5605,20 @@ expose_event_cb(GtkWidget *widget, cairo_t *cr)
 
     return FALSE;
 }
+
+gboolean
+expose_event_decoration_draw_cb(GtkWidget *widget, cairo_t *cr)
+{
+  static GtkWidgetState state;
+  GdkRectangle rect = {0,0,0,0};
+  gtk_window_get_size(GTK_WINDOW(widget), &rect.width, &rect.height);
+  moz_gtk_widget_paint(MOZ_GTK_WINDOW_DECORATION, cr,
+                       &rect,
+                       &state, 0,
+                       GTK_TEXT_DIR_NONE);
+  return TRUE;
+}
+
 #endif //MOZ_WIDGET_GTK == 2
 
 static gboolean
@@ -6634,7 +6681,7 @@ nsWindow::SetNonClientMargins(LayoutDeviceIntMargin &aMargins)
 void
 nsWindow::SetDrawsInTitlebar(bool aState)
 {
-  if (aState == mDrawsInTitlebar)
+  if (aState == mDrawWindowDecoration)
     return;
 
   int32_t isCSDAvailable = -1;
@@ -6650,7 +6697,7 @@ nsWindow::SetDrawsInTitlebar(bool aState)
     gtk_window_set_decorated(GTK_WINDOW(mShell), !aState);
   }
    
-  mDrawsInTitlebar = aState;
+  mDrawWindowDecoration = aState;
 
   UpdateClientShadowWidth();
 }
@@ -6928,7 +6975,7 @@ nsWindow::SynthesizeNativeTouchPoint(uint32_t aPointerId,
 bool
 nsWindow::IsClientDecorated() const
 {
-    return mDrawsInTitlebar;
+    return mDrawWindowDecoration;
 }
 
 int
@@ -6959,7 +7006,12 @@ nsWindow::UpdateClientShadowWidth()
   static auto sGdkWindowSetShadowWidth =
     (void (*)(GdkWindow*, gint, gint, gint, gint))
     dlsym(RTLD_DEFAULT, "gdk_window_set_shadow_width");
-  sGdkWindowSetShadowWidth(mGdkWindow, left, right, top, bottom);
+  sGdkWindowSetShadowWidth(mShadowGdkWindow, left, right, top, bottom);
+
+  mWindowDecorationSize.left = left;
+  mWindowDecorationSize.right = right;
+  mWindowDecorationSize.top = top;
+  mWindowDecorationSize.bottom = bottom;
 }
 
 bool

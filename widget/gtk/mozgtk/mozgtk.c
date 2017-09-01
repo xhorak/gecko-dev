@@ -601,6 +601,11 @@ STUB(gtk_color_chooser_get_type)
 STUB(gtk_color_chooser_set_rgba)
 STUB(gtk_color_chooser_get_rgba)
 STUB(gtk_color_chooser_set_use_alpha)
+STUB(gtk_window_get_size)
+STUB(gtk_widget_set_margin_left)
+STUB(gtk_widget_set_margin_right)
+STUB(gtk_widget_set_margin_top)
+STUB(gtk_widget_set_margin_bottom)
 #endif
 
 #ifdef GTK2_SYMBOLS

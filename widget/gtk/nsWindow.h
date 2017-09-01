@@ -62,6 +62,11 @@ extern mozilla::LazyLogModule gWidgetDrawLog;
 
 #endif /* MOZ_LOGGING */
 
+#define LOG(args)       printf args
+#define LOGFOCUS(args)  printf args
+#define LOGDRAG(args)   printf args
+#define LOGDRAW(args)   printf args
+
 class gfxPattern;
 
 namespace mozilla {
@@ -453,6 +458,7 @@ private:
     GtkWidget          *mShell;
     MozContainer       *mContainer;
     GdkWindow          *mGdkWindow;
+    GdkWindow          *mShadowGdkWindow;
     PlatformCompositorWidgetDelegate* mCompositorWidgetDelegate;
 
 
@@ -552,7 +558,8 @@ private:
     nsSizeMode         mLastSizeMode;
 
     // If true, draw our own window decorations (where supported).
-    bool mDrawsInTitlebar;
+    bool              mDrawWindowDecoration;
+    GtkBorder         mWindowDecorationSize;
 
     static bool DragInProgress(void);
 
