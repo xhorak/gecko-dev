@@ -806,18 +806,6 @@ html|span.ac-emphasize-text-url {
 
 /* Titlebar/CSD */
 @media (-moz-gtk-csd-available) {  
-  #main-window[tabsintitlebar][sizemode="normal"] {
-/*     -moz-appearance: -moz-gtk-window-decoration;*/
-     -moz-appearance: none;
-     background-color: transparent; 
-/*     
-     -moz-appearance: none; 
-    background-color: red;
-    border: solid red;
-    background-clip: content-box;
-    background-origin: content-box;
-*/    
-  }  
 
   #main-window[tabsintitlebar][sizemode="normal"]:not([customizing]):not(:-moz-lwtheme) > #titlebar {
     -moz-appearance: -moz-window-titlebar;

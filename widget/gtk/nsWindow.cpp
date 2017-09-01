@@ -3806,13 +3806,12 @@ nsWindow::Create(nsIWidget* aParent,
 #if (MOZ_WIDGET_GTK == 3)
         // "csd" style is set when widget is realized so we need to call
         // it explicitly now.
-        //gtk_widget_realize(mShell);
+        gtk_widget_realize(mShell);
 
         // We can't draw directly to top-level window when client side
         // decorations are enabled. We use container with GdkWindow instead.
         GtkStyleContext* style = gtk_widget_get_style_context(mShell);
         shellHasCSD = gtk_style_context_has_class(style, "csd");
-        fprintf(stderr, "shellHasCSD = %d\n", shellHasCSD);
 #endif
         if (!shellHasCSD) {
             // Use mShell's window for drawing and events.

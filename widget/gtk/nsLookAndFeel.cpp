@@ -1502,7 +1502,6 @@ nsLookAndFeel::EnsureInit()
     // 3.20 exposes gtk_render_background_get_clip, which is required for
     // calculating shadow metrics for decorated windows.
     sCSDAvailable = gtk_check_version(3, 20, 0) == nullptr;
-    //sCSDAvailable = false;
 }
 
 // virtual
