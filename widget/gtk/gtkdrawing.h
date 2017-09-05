@@ -277,12 +277,8 @@ typedef enum {
   MOZ_GTK_WINDOW_CONTAINER,
   /* Window with the 'csd' style class. */
   MOZ_GTK_WINDOW_CSD,
-  /* Window with the 'csd' style class. */
-  MOZ_GTK_WINDOW_SOLID_CSD,
   /* Client-side window decoration node. Available on GTK 3.20+. */
   MOZ_GTK_WINDOW_DECORATION,
-  /* Solid client-side window decoration node. Available on GTK 3.20+. */
-  MOZ_GTK_WINDOW_DECORATION_SOLID,
   /* Paints a GtkInfoBar, for notifications. */
   MOZ_GTK_INFO_BAR,
   /* Used for widget tree construction. */
@@ -573,6 +569,12 @@ gint moz_gtk_splitter_get_metrics(gint orientation, gint* size);
  * Only available on GTK 3.20+.
  */
 void moz_gtk_get_window_border(gint* top, gint* right, gint* bottom, gint* left);
+
+/**
+ * Draw window decorations, typically a shadow.
+ * Only available on GTK 3.20+.
+ */
+void moz_gtk_window_decoration_paint(cairo_t *cr, GdkRectangle* rect);
 #endif
 
 /**

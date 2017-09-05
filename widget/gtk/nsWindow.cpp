@@ -444,7 +444,7 @@ nsWindow::nsWindow()
 
     mContainer           = nullptr;
     mGdkWindow           = nullptr;
-    mShadowGdkWindow     = nullptr;
+    mIsCSDAvailable      = false;
     mShell               = nullptr;
     mCompositorWidgetDelegate = nullptr;
     mHasMappedToplevel   = false;
@@ -2798,7 +2798,8 @@ nsWindow::OnButtonPressEvent(GdkEventButton *aEvent)
     // Check to see if the event is within our window's resize region
     GdkWindowEdge edge;
     if (CheckResizerEdge(GetRefPoint(this, aEvent), edge)) {
-        gdk_window_begin_resize_drag(mShadowGdkWindow, edge, aEvent->button,
+        gdk_window_begin_resize_drag(gtk_widget_get_window(mShell),
+                                     edge, aEvent->button,
                                      aEvent->x_root, aEvent->y_root,
                                      aEvent->time);
         return;
@@ -3389,7 +3390,7 @@ nsWindow::OnWindowStateEvent(GtkWidget *aWidget, GdkEventWindowState *aEvent)
 #endif //ACCESSIBILITY
     }
 
-    UpdateClientShadowWidth();
+    UpdateClientDecorations();
 
     if (mWidgetListener) {
       mWidgetListener->SizeModeChanged(mSizeState);
@@ -3455,7 +3456,7 @@ nsWindow::OnCompositedChanged()
       presShell->ThemeChanged();
     }
   }
-  UpdateClientShadowWidth();
+  UpdateClientDecorations();
 }
 
 void
@@ -3644,12 +3645,7 @@ nsWindow::Create(nsIWidget* aParent,
     GtkWindow      *topLevelParent = nullptr;
     nsWindow       *parentnsWindow = nullptr;
     GtkWidget      *eventWidget = nullptr;
-    // When CSD is available we emulate it for toplevel windows.
-    // Content is rendered to container and decoration to mShell.
-    bool            drawToContainer = gtk_check_version(3, 20, 0) == nullptr &&
-                    aInitData->mWindowType == eWindowType_toplevel;
-
-    mDrawWindowDecoration = drawToContainer;
+    bool            drawToContainer = false;
 
     if (aParent) {
         parentnsWindow = static_cast<nsWindow*>(aParent);
@@ -3696,30 +3692,48 @@ nsWindow::Create(nsIWidget* aParent,
               GTK_WINDOW_TOPLEVEL : GTK_WINDOW_POPUP;
         mShell = gtk_window_new(type);
 
-        bool useAlphaVisual = (mWindowType == eWindowType_popup &&
-                               aInitData->mSupportTranslucency) ||
-                               drawToContainer;
+        bool useAlphaVisual = false;
+#if (MOZ_WIDGET_GTK == 3)
+        // When CSD is available we emulate it for toplevel windows.
+        // Content is rendered to container and transparent decorations to mShell.
+        // The mShell visual can be changed later on "composited-changed" signal
+        // but we have to create mShell/mContainer GdkWindows now.
+        if (mWindowType == eWindowType_toplevel) {
+            int32_t isCSDAvailable = -1;
+            nsresult rv = LookAndFeel::GetInt(LookAndFeel::eIntID_GTKCSDAvailable,
+                                             &isCSDAvailable);
+            if (NS_SUCCEEDED(rv)) {
+                mIsCSDAvailable = useAlphaVisual = isCSDAvailable;
+            }
+        } else
+#endif
+        if (mWindowType == eWindowType_popup){
+            useAlphaVisual = aInitData->mSupportTranslucency;
+        }
 
         // mozilla.widget.use-argb-visuals is a hidden pref defaulting to false
         // to allow experimentation
         if (Preferences::GetBool("mozilla.widget.use-argb-visuals", false))
             useAlphaVisual = true;
 
+        // An ARGB visual is only useful if we are on a compositing
+        // window manager.
+        GdkScreen *screen = gtk_widget_get_screen(mShell);
+        if (useAlphaVisual && !gdk_screen_is_composited(screen)) {
+            useAlphaVisual = false;
+        }
+
         // We need to select an ARGB visual here instead of in
         // SetTransparencyMode() because it has to be done before the
-        // widget is realized.  An ARGB visual is only useful if we
-        // are on a compositing window manager.
+        // widget is realized.
         if (useAlphaVisual) {
-            GdkScreen *screen = gtk_widget_get_screen(mShell);
-            if (gdk_screen_is_composited(screen)) {
 #if (MOZ_WIDGET_GTK == 2)
-                GdkColormap *colormap = gdk_screen_get_rgba_colormap(screen);
-                gtk_widget_set_colormap(mShell, colormap);
+            GdkColormap *colormap = gdk_screen_get_rgba_colormap(screen);
+            gtk_widget_set_colormap(mShell, colormap);
 #else
-                GdkVisual *visual = gdk_screen_get_rgba_visual(screen);
-                gtk_widget_set_visual(mShell, visual);
+            GdkVisual *visual = gdk_screen_get_rgba_visual(screen);
+            gtk_widget_set_visual(mShell, visual);
 #endif
-            }
         }
 
         // We only move a general managed toplevel window if someone has
@@ -3809,22 +3823,15 @@ nsWindow::Create(nsIWidget* aParent,
         }
 
         // Create a container to hold child windows and child GtkWidgets.
+        bool drawToContainer = false;
         GtkWidget *container = moz_container_new();
         mContainer = MOZ_CONTAINER(container);
 
 #if (MOZ_WIDGET_GTK == 3)
-        // TODO: Do we need that? popups/tooltips are rendered without
-        // decorations so they always have "csd" disabled.
-        if (!drawToContainer) {
-            // "csd" style is set when widget is realized so we need to call
-            // it explicitly now.
-            gtk_widget_realize(mShell);
-
-            // We can't draw directly to top-level window when client side
-            // decorations are enabled. We use container with GdkWindow instead.
-            GtkStyleContext* style = gtk_widget_get_style_context(mShell);
-            drawToContainer = gtk_style_context_has_class(style, "csd");
-        }
+        // When client side decorations are enabled (rendered by us or by Gtk+)
+        // the decoration is rendered to mShell (toplevel) window and
+        // we use container with GdkWindow to draw our content.
+        drawToContainer = mIsCSDAvailable;
 #endif
         if (drawToContainer) {
             gtk_widget_set_app_paintable(GTK_WIDGET(mContainer), TRUE);
@@ -3849,19 +3856,11 @@ nsWindow::Create(nsIWidget* aParent,
 
         // the drawing window
         mGdkWindow = gtk_widget_get_window(eventWidget);
-        if (drawToContainer) {
-            mShadowGdkWindow = gtk_widget_get_window(mShell);
-            if (mDrawWindowDecoration) {
-                UpdateClientShadowWidth();
-                gtk_widget_set_margin_left(GTK_WIDGET(mContainer), mWindowDecorationSize.left);
-                gtk_widget_set_margin_right(GTK_WIDGET(mContainer), mWindowDecorationSize.right);
-                gtk_widget_set_margin_top(GTK_WIDGET(mContainer), mWindowDecorationSize.top);
-                gtk_widget_set_margin_bottom(GTK_WIDGET(mContainer), mWindowDecorationSize.bottom);
-                gtk_window_set_decorated(GTK_WINDOW(mShell), false);
-                gtk_widget_set_app_paintable(mShell, TRUE);
-            }
-        }
-
+/*
+        GtkWidget *tmp = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+        gtk_widget_realize(tmp);
+        mGdkWindow = gtk_widget_get_window(tmp);
+*/
         if (mWindowType == eWindowType_popup) {
             // gdk does not automatically set the cursor for "temporary"
             // windows, which are what gtk uses for popups.
@@ -3994,7 +3993,7 @@ nsWindow::Create(nsIWidget* aParent,
 #else
         g_signal_connect(G_OBJECT(mContainer), "draw",
                          G_CALLBACK(expose_event_cb), nullptr);
-        if (mDrawWindowDecoration) {
+        if (mIsCSDAvailable) {
             g_signal_connect(G_OBJECT(mShell), "draw",
                             G_CALLBACK(expose_event_decoration_draw_cb), nullptr);
         }
@@ -5606,16 +5605,27 @@ expose_event_cb(GtkWidget *widget, cairo_t *cr)
     return FALSE;
 }
 
+/* static */
 gboolean
 expose_event_decoration_draw_cb(GtkWidget *widget, cairo_t *cr)
 {
-  static GtkWidgetState state;
-  GdkRectangle rect = {0,0,0,0};
-  gtk_window_get_size(GTK_WINDOW(widget), &rect.width, &rect.height);
-  moz_gtk_widget_paint(MOZ_GTK_WINDOW_DECORATION, cr,
-                       &rect,
-                       &state, 0,
-                       GTK_TEXT_DIR_NONE);
+  GdkWindow* gdkWindow = gtk_widget_get_window(widget);
+  if (gtk_cairo_should_draw_window(cr, gdkWindow)) {
+      RefPtr<nsWindow> window = get_window_for_gtk_widget(widget);
+      if (!window) {
+          NS_WARNING("Cannot get nsWindow from GtkWidget");
+      }
+      else if (window->IsClientDecorated()) {
+          cairo_save(cr);
+          gtk_cairo_transform_to_window(cr, widget, gdkWindow);
+
+          GdkRectangle rect = {0,0,0,0};
+          gtk_window_get_size(GTK_WINDOW(widget), &rect.width, &rect.height);
+          moz_gtk_window_decoration_paint(cr, &rect);
+
+          cairo_restore(cr);
+      }
+  }
   return TRUE;
 }
 
@@ -6676,30 +6686,22 @@ nsWindow::SetNonClientMargins(LayoutDeviceIntMargin &aMargins)
 {
   SetDrawsInTitlebar(aMargins.top == 0);
   return NS_OK;
-}  
+}
 
 void
 nsWindow::SetDrawsInTitlebar(bool aState)
 {
-  if (aState == mDrawWindowDecoration)
+  if (!mIsCSDAvailable || aState == mDrawWindowDecoration)
     return;
-
-  int32_t isCSDAvailable = -1;
-  nsresult rv = LookAndFeel::GetInt(LookAndFeel::eIntID_GTKCSDAvailable,
-                                    &isCSDAvailable);
-  if (NS_FAILED(rv) || !isCSDAvailable) {
-    NS_WARNING("Client side decorations unsupported, ignoring.");
-    return;
-  }
 
   if (mShell) {
     NS_WARNING("gtk_window_set_decorated may not have any effect when called on a window that is already visible.");
     gtk_window_set_decorated(GTK_WINDOW(mShell), !aState);
+    gtk_widget_set_app_paintable(mShell, aState);
   }
-   
-  mDrawWindowDecoration = aState;
 
-  UpdateClientShadowWidth();
+  mDrawWindowDecoration = aState;
+  UpdateClientDecorations();
 }
 
 gint
@@ -6975,7 +6977,7 @@ nsWindow::SynthesizeNativeTouchPoint(uint32_t aPointerId,
 bool
 nsWindow::IsClientDecorated() const
 {
-    return mDrawWindowDecoration;
+    return mDrawWindowDecoration && mSizeState == nsSizeMode_Normal;
 }
 
 int
@@ -6992,21 +6994,29 @@ nsWindow::GetClientResizerSize()
 }
 
 void
-nsWindow::UpdateClientShadowWidth()
+nsWindow::UpdateClientDecorations()
 {
-  if (gtk_check_version(3, 12, 0) != nullptr)
-    return;
+  if (!mIsCSDAvailable)
+      return;
 
-  // Shadows are only used for normal, non-solid client windows with CSD.
+  // Shadows are only used for normal, non-solid client windows with CSD
+  // and we need to reset them for maximized windows.
   gint top = 0, right = 0, bottom = 0, left = 0;
-  if (IsClientDecorated() && IsComposited() && mSizeState == nsSizeMode_Normal) {
-    moz_gtk_get_window_border(&top, &right, &bottom, &left);
+  if (IsClientDecorated()) {
+      moz_gtk_get_window_border(&top, &right, &bottom, &left);
   }
 
   static auto sGdkWindowSetShadowWidth =
     (void (*)(GdkWindow*, gint, gint, gint, gint))
     dlsym(RTLD_DEFAULT, "gdk_window_set_shadow_width");
-  sGdkWindowSetShadowWidth(mShadowGdkWindow, left, right, top, bottom);
+  sGdkWindowSetShadowWidth(gtk_widget_get_window(mShell),
+                           left, right, top, bottom);
+
+  // TODO -> fails when mContainer allocation is wrong because calls resize
+  gtk_widget_set_margin_left(GTK_WIDGET(mContainer), left);
+  gtk_widget_set_margin_right(GTK_WIDGET(mContainer), right);
+  gtk_widget_set_margin_top(GTK_WIDGET(mContainer), top);
+  gtk_widget_set_margin_bottom(GTK_WIDGET(mContainer), bottom);
 
   mWindowDecorationSize.left = left;
   mWindowDecorationSize.right = right;
@@ -7026,11 +7036,8 @@ nsWindow::CheckResizerEdge(LayoutDeviceIntPoint aPoint, GdkWindowEdge& aOutEdge)
     return false;
 
   gint left, top, right, bottom;
-/*
-  WidgetNodeType type = IsComposited() ? MOZ_GTK_WINDOW_DECORATION
-                                       : MOZ_GTK_WINDOW_DECORATION_SOLID;
-*/
-  WidgetNodeType type = MOZ_GTK_WINDOW_DECORATION_SOLID;
+
+  WidgetNodeType type = MOZ_GTK_WINDOW_DECORATION;
   Unused << moz_gtk_get_widget_border(type, &left, &top, &right, &bottom,
                                       GTK_TEXT_DIR_LTR);
   gint scale = GdkScaleFactor();
@@ -7092,11 +7099,7 @@ nsWindow::IsComposited() const
   }
 
   GdkScreen* gdkScreen = gdk_screen_get_default();
-  return gdk_screen_is_composited(gdkScreen);
-
-  /*
   return gdk_screen_is_composited(gdkScreen) &&
          (gdk_window_get_visual(mGdkWindow)
             == gdk_screen_get_rgba_visual(gdkScreen));
-         */
 }

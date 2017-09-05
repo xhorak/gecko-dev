@@ -62,11 +62,6 @@ extern mozilla::LazyLogModule gWidgetDrawLog;
 
 #endif /* MOZ_LOGGING */
 
-#define LOG(args)       printf args
-#define LOGFOCUS(args)  printf args
-#define LOGDRAG(args)   printf args
-#define LOGDRAW(args)   printf args
-
 class gfxPattern;
 
 namespace mozilla {
@@ -376,6 +371,9 @@ public:
     LayoutDeviceIntRect GdkRectToDevicePixels(GdkRectangle rect);
 
     virtual bool WidgetTypeSupportsAcceleration() override;
+
+    // Decorations
+    bool IsClientDecorated() const;
 protected:
     virtual ~nsWindow();
 
@@ -393,13 +391,11 @@ protected:
 
     virtual void RegisterTouchWindow() override;
 
-    // Decorations
-    bool IsClientDecorated() const;
     int GetClientResizerSize();
 
     // Informs the window manager about the size of the shadows surrounding
     // a client-side decorated window.
-    void UpdateClientShadowWidth();
+    void UpdateClientDecorations();
 
     // Returns true if the given point (in device pixels) is within a resizer
     // region of the window. Only used when drawing decorations client side.
@@ -458,7 +454,7 @@ private:
     GtkWidget          *mShell;
     MozContainer       *mContainer;
     GdkWindow          *mGdkWindow;
-    GdkWindow          *mShadowGdkWindow;
+    bool                mIsCSDAvailable;
     PlatformCompositorWidgetDelegate* mCompositorWidgetDelegate;
 
 

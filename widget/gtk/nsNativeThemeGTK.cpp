@@ -707,7 +707,8 @@ nsNativeThemeGTK::GetGtkWidgetAndState(uint8_t aWidgetType, nsIFrame* aFrame,
       if (window && window->IsComposited()) {
         aGtkWidgetType = MOZ_GTK_WINDOW_DECORATION;
       } else {
-        aGtkWidgetType = MOZ_GTK_WINDOW_DECORATION_SOLID;
+        // We support decorations on composited screens only.
+        return false;
       }
       break;
     }

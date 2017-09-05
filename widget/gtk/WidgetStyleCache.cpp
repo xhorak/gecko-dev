@@ -35,9 +35,6 @@ CreateWindowWidget(WidgetNodeType type)
   case MOZ_GTK_WINDOW_CSD:
     gtk_style_context_add_class(style, "csd");
     break;
-  case MOZ_GTK_WINDOW_SOLID_CSD:
-    gtk_style_context_add_class(style, "solid-csd");
-    break;
   default:
     break;
   }
@@ -635,7 +632,6 @@ CreateWidget(WidgetNodeType aWidgetType)
   switch (aWidgetType) {
     case MOZ_GTK_WINDOW:
     case MOZ_GTK_WINDOW_CSD:
-    case MOZ_GTK_WINDOW_SOLID_CSD:
       return CreateWindowWidget(aWidgetType);
     case MOZ_GTK_WINDOW_CONTAINER:
       return CreateWindowContainerWidget();
@@ -1163,10 +1159,6 @@ GetCssNodeStyleInternal(WidgetNodeType aNodeType)
       style = CreateChildCSSNode("decoration",
                                  MOZ_GTK_WINDOW_CSD);
       break;
-    case MOZ_GTK_WINDOW_DECORATION_SOLID:
-      style = CreateChildCSSNode("decoration",
-                                 MOZ_GTK_WINDOW_SOLID_CSD);
-      break;
     default:
       return GetWidgetRootStyle(aNodeType);
   }
@@ -1341,11 +1333,6 @@ GtkStyleContext*
 ClaimStyleContext(WidgetNodeType aNodeType, GtkTextDirection aDirection,
                   GtkStateFlags aStateFlags, StyleFlags aFlags)
 {
-  GtkWidget* window = GetWidget(MOZ_GTK_WINDOW);
-  GtkStyleContext* windowStyle = gtk_widget_get_style_context(window);
-  if (aFlags & MOZ_WINDOW_MAXIMIZED)
-    gtk_style_context_add_class(windowStyle, "maximized");
-
   GtkStyleContext* style;
   if (gtk_check_version(3, 20, 0) != nullptr) {
     style = GetWidgetStyleInternal(aNodeType);
@@ -1403,7 +1390,4 @@ ClaimStyleContext(WidgetNodeType aNodeType, GtkTextDirection aDirection,
 void
 ReleaseStyleContext(GtkStyleContext* aStyleContext)
 {
-  GtkWidget* window = GetWidget(MOZ_GTK_WINDOW);
-  GtkStyleContext* style = gtk_widget_get_style_context(window);
-  gtk_style_context_remove_class(style, "maximized");
 }

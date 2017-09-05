@@ -270,8 +270,6 @@ moz_gtk_get_window_border(gint* top, gint* right, gint* bottom, gint* left)
   GtkBorder windowMargin;
   gtk_style_context_get_margin(style, GTK_STATE_FLAG_NORMAL, &windowMargin);
 
-  ReleaseStyleContext(style);
-
   style = ClaimStyleContext(MOZ_GTK_WINDOW_DECORATION);
 
   // Available on GTK 3.20+.
@@ -281,7 +279,6 @@ moz_gtk_get_window_border(gint* top, gint* right, gint* bottom, gint* left)
 
   GdkRectangle shadowClip;
   sGtkRenderBackgroundGetClip(style, 0, 0, 0, 0, &shadowClip);
-  ReleaseStyleContext(style);
 
   // Transfer returned inset rectangle to GtkBorder
   GtkBorder shadowBorder = {
@@ -311,45 +308,6 @@ moz_gtk_window_paint(cairo_t *cr, GdkRectangle* rect,
     ReleaseStyleContext(style);
 
     return MOZ_GTK_SUCCESS;
-}
-
-static gint
-moz_gtk_window_decoration_paint(cairo_t *cr, GdkRectangle* rect,
-                                GtkTextDirection direction)
-{
-    gint top, right, bottom, left;
-    moz_gtk_get_window_border(&top, &right, &bottom, &left);
-
-    GtkStyleContext* style = ClaimStyleContext(MOZ_GTK_WINDOW_DECORATION,
-                                               direction);
-
-    rect->x += left;
-    rect->y += top;
-    rect->width -= left + right;
-    rect->height -= top + bottom;
-
-    gtk_render_background(style, cr, rect->x, rect->y, rect->width, rect->height);
-    gtk_render_frame(style, cr, rect->x, rect->y, rect->width, rect->height);
-
-    ReleaseStyleContext(style);
-
-    return MOZ_GTK_SUCCESS;
-}
-
-static gint
-moz_gtk_window_decoration_solid_paint(cairo_t *cr, GdkRectangle* rect,
-                                      GtkTextDirection direction)
-{
-    GtkStyleContext* style = ClaimStyleContext(MOZ_GTK_WINDOW_DECORATION_SOLID,
-                                               direction);
-
-    gtk_render_background(style, cr, rect->x, rect->y, rect->width, rect->height);
-    gtk_render_frame(style, cr, rect->x, rect->y, rect->width, rect->height);
-
-    ReleaseStyleContext(style);
-
-    return MOZ_GTK_SUCCESS;
-
 }
 
 static gint
@@ -2418,13 +2376,6 @@ moz_gtk_get_widget_border(WidgetNodeType widget, gint* left, gint* top,
             moz_gtk_get_window_border(top, right, bottom, left);
             return MOZ_GTK_SUCCESS;
         }
-    case MOZ_GTK_WINDOW_DECORATION_SOLID:
-        {
-            style = ClaimStyleContext(MOZ_GTK_WINDOW_DECORATION_SOLID);
-            moz_gtk_add_border_padding(style, left, top, right, bottom);
-            ReleaseStyleContext(style);
-            return MOZ_GTK_SUCCESS;
-        }
     case MOZ_GTK_HEADER_BAR:
     case MOZ_GTK_HEADER_BAR_MAXIMIZED:
         {
@@ -2894,6 +2845,36 @@ GetScrollbarMetrics(GtkOrientation aOrientation)
     return metrics;
 }
 
+void
+moz_gtk_window_decoration_paint(cairo_t *cr, GdkRectangle* rect)
+{
+    gint top, right, bottom, left;
+    moz_gtk_get_window_border(&top, &right, &bottom, &left);
+
+    cairo_save(cr);
+    cairo_set_operator(cr, CAIRO_OPERATOR_CLEAR);
+    cairo_rectangle(cr, rect->x, rect->y, left, rect->height);
+    cairo_fill(cr);
+    cairo_rectangle(cr, rect->x+rect->width-right, rect->y, right, rect->height);
+    cairo_fill(cr);
+    cairo_rectangle(cr, rect->x, rect->y, rect->width, top);
+    cairo_fill(cr);
+    cairo_rectangle(cr, rect->x, rect->height-bottom, rect->width, bottom);
+    cairo_fill(cr);
+    cairo_restore(cr);
+
+    GtkStyleContext* style = ClaimStyleContext(MOZ_GTK_WINDOW_DECORATION,
+                                               GTK_TEXT_DIR_NONE);
+    rect->x += left;
+    rect->y += top;
+    rect->width -= left + right;
+    rect->height -= top + bottom;
+
+    gtk_render_background(style, cr, rect->x, rect->y, rect->width, rect->height);
+    gtk_render_frame(style, cr, rect->x, rect->y, rect->width, rect->height);
+}
+
+
 /* cairo_t *cr argument has to be a system-cairo. */
 gint
 moz_gtk_widget_paint(WidgetNodeType widget, cairo_t *cr,
@@ -3136,12 +3117,6 @@ moz_gtk_widget_paint(WidgetNodeType widget, cairo_t *cr,
         break;
     case MOZ_GTK_WINDOW:
         return moz_gtk_window_paint(cr, rect, direction);
-        break;
-    case MOZ_GTK_WINDOW_DECORATION:
-        return moz_gtk_window_decoration_paint(cr, rect, direction);
-        break;
-    case MOZ_GTK_WINDOW_DECORATION_SOLID:
-        return moz_gtk_window_decoration_solid_paint(cr, rect, direction);
         break;
     case MOZ_GTK_INFO_BAR:
         return moz_gtk_info_bar_paint(cr, rect, state);
