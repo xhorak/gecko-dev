@@ -590,41 +590,6 @@ CreateHeaderBarButton(WidgetNodeType aWidgetType)
 
   return widget;
 }
-/*
-
-static GtkWidget*
-CreateHeaderBar()
-{
-  MOZ_ASSERT(gtk_check_version(3, 10, 0) == nullptr,
-             "GtkHeaderBar is only available on GTK 3.10+.");
- 
-  static auto sGtkHeaderBarNewPtr = (GtkWidget* (*)())
-    dlsym(RTLD_DEFAULT, "gtk_header_bar_new");
-  static const char* MOZ_GTK_STYLE_CLASS_TITLEBAR = "titlebar";
- 
-  GtkWidget* widget = sGtkHeaderBarNewPtr();
-  AddToWindowContainer(widget);
-   
-  GtkStyleContext* style = gtk_widget_get_style_context(widget);
-  gtk_style_context_add_class(style, MOZ_GTK_STYLE_CLASS_TITLEBAR);
- 
-  return widget;
-}
-
-static GtkWidget*
-CreateHeaderBarButton()
-{
-  static const char* MOZ_GTK_STYLE_CLASS_TITLEBUTTON = "titlebutton";
-
-  GtkWidget* widget = gtk_button_new();
-  gtk_container_add(GTK_CONTAINER(GetWidget(MOZ_GTK_HEADER_BAR)), widget);
-
-  GtkStyleContext* style = gtk_widget_get_style_context(widget);
-  gtk_style_context_add_class(style, MOZ_GTK_STYLE_CLASS_TITLEBUTTON);
-
-  return widget;
-}
-*/
 
 static GtkWidget*
 CreateWidget(WidgetNodeType aWidgetType)

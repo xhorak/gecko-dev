@@ -2592,7 +2592,7 @@ nsWindow::OnMotionNotifyEvent(GdkEventMotion *aEvent)
         }
     }
 #endif /* MOZ_X11 */
-
+/*
     GdkWindowEdge edge;
     if (CheckResizerEdge(GetRefPoint(this, aEvent), edge)) {
         nsCursor cursor = eCursor_none;
@@ -2624,8 +2624,13 @@ nsWindow::OnMotionNotifyEvent(GdkEventMotion *aEvent)
         }
         SetCursor(cursor);
         return;
+    } else {
+        TODO -> fix that!
+        if (mCursor !=  eCursor_standard) {
+            SetCursor(eCursor_standard);
+        }
     }
-
+*/
     WidgetMouseEvent event(true, eMouseMove, this, WidgetMouseEvent::eReal);
 
     gdouble pressure = 0;
@@ -2794,7 +2799,7 @@ nsWindow::OnButtonPressEvent(GdkEventButton *aEvent)
     // check to see if we should rollup
     if (CheckForRollup(aEvent->x_root, aEvent->y_root, false, false))
         return;
-
+/*
     // Check to see if the event is within our window's resize region
     GdkWindowEdge edge;
     if (CheckResizerEdge(GetRefPoint(this, aEvent), edge)) {
@@ -2804,7 +2809,7 @@ nsWindow::OnButtonPressEvent(GdkEventButton *aEvent)
                                      aEvent->time);
         return;
     }
-
+*/
     gdouble pressure = 0;
     gdk_event_get_axis ((GdkEvent*)aEvent, GDK_AXIS_PRESSURE, &pressure);
     mLastMotionPressure = pressure;
@@ -7005,23 +7010,25 @@ nsWindow::UpdateClientDecorations()
   if (IsClientDecorated()) {
       moz_gtk_get_window_border(&top, &right, &bottom, &left);
   }
-
+/*
   static auto sGdkWindowSetShadowWidth =
     (void (*)(GdkWindow*, gint, gint, gint, gint))
     dlsym(RTLD_DEFAULT, "gdk_window_set_shadow_width");
   sGdkWindowSetShadowWidth(gtk_widget_get_window(mShell),
                            left, right, top, bottom);
-
+*/
   // TODO -> fails when mContainer allocation is wrong because calls resize
   gtk_widget_set_margin_left(GTK_WIDGET(mContainer), left);
   gtk_widget_set_margin_right(GTK_WIDGET(mContainer), right);
   gtk_widget_set_margin_top(GTK_WIDGET(mContainer), top);
   gtk_widget_set_margin_bottom(GTK_WIDGET(mContainer), bottom);
 
+/*  TODO -> save to optimiza calls
   mWindowDecorationSize.left = left;
   mWindowDecorationSize.right = right;
   mWindowDecorationSize.top = top;
   mWindowDecorationSize.bottom = bottom;
+*/
 }
 
 bool
@@ -7029,10 +7036,6 @@ nsWindow::CheckResizerEdge(LayoutDeviceIntPoint aPoint, GdkWindowEdge& aOutEdge)
 {
   // We only need to handle resizers when using CSD.
   if (!IsClientDecorated())
-    return false;
-
-  // Don't allow resizing maximized windows.
-  if (mSizeState != nsSizeMode_Normal)
     return false;
 
   gint left, top, right, bottom;
