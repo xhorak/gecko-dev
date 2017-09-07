@@ -2602,45 +2602,49 @@ nsWindow::OnMotionNotifyEvent(GdkEventMotion *aEvent)
 #endif /* MOZ_X11 */
     // Client is decorated and we're getting the motion event for mShell
     // window which draws the CSD decorations around mContainer.
-    if (IsClientDecorated() && aEvent->window == gtk_widget_get_window(mShell)) {
-        GdkWindowEdge edge;
-        LayoutDeviceIntPoint refPoint =
-            GdkEventCoordsToDevicePixels(aEvent->x, aEvent->y);
-        if (CheckResizerEdge(refPoint, edge)) {
-            nsCursor cursor = eCursor_none;
-            switch (edge) {
-            case GDK_WINDOW_EDGE_NORTH:
-                cursor = eCursor_n_resize;
-                break;
-            case GDK_WINDOW_EDGE_NORTH_WEST:
-                cursor = eCursor_nw_resize;
-                break;
-            case GDK_WINDOW_EDGE_NORTH_EAST:
-                cursor = eCursor_ne_resize;
-                break;
-            case GDK_WINDOW_EDGE_WEST:
-                cursor = eCursor_w_resize;
-                break;
-            case GDK_WINDOW_EDGE_EAST:
-                cursor = eCursor_e_resize;
-                break;
-            case GDK_WINDOW_EDGE_SOUTH:
-                cursor = eCursor_s_resize;
-                break;
-            case GDK_WINDOW_EDGE_SOUTH_WEST:
-                cursor = eCursor_sw_resize;
-                break;
-            case GDK_WINDOW_EDGE_SOUTH_EAST:
-                cursor = eCursor_se_resize;
-                break;
+    if (IsClientDecorated()) {
+        if (aEvent->window == gtk_widget_get_window(mShell)) {
+            GdkWindowEdge edge;
+            LayoutDeviceIntPoint refPoint =
+                GdkEventCoordsToDevicePixels(aEvent->x, aEvent->y);
+            if (CheckResizerEdge(refPoint, edge)) {
+                nsCursor cursor = eCursor_none;
+                switch (edge) {
+                case GDK_WINDOW_EDGE_NORTH:
+                    cursor = eCursor_n_resize;
+                    break;
+                case GDK_WINDOW_EDGE_NORTH_WEST:
+                    cursor = eCursor_nw_resize;
+                    break;
+                case GDK_WINDOW_EDGE_NORTH_EAST:
+                    cursor = eCursor_ne_resize;
+                    break;
+                case GDK_WINDOW_EDGE_WEST:
+                    cursor = eCursor_w_resize;
+                    break;
+                case GDK_WINDOW_EDGE_EAST:
+                    cursor = eCursor_e_resize;
+                    break;
+                case GDK_WINDOW_EDGE_SOUTH:
+                    cursor = eCursor_s_resize;
+                    break;
+                case GDK_WINDOW_EDGE_SOUTH_WEST:
+                    cursor = eCursor_sw_resize;
+                    break;
+                case GDK_WINDOW_EDGE_SOUTH_EAST:
+                    cursor = eCursor_se_resize;
+                    break;
+                }
+                SetCursor(cursor);
+                return;
             }
-            SetCursor(cursor);
-            return;
-        } else {
-            //TODO -> fix that!
-            if (mCursor !=  eCursor_standard) {
-                SetCursor(eCursor_standard);
-            }
+        }
+        // We're not on resize handle - check if we need to reset cursor back.
+        if (mCursor == eCursor_n_resize || mCursor == eCursor_nw_resize ||
+            mCursor == eCursor_ne_resize ||  mCursor == eCursor_w_resize ||
+            mCursor == eCursor_e_resize || mCursor == eCursor_s_resize ||
+            mCursor == eCursor_sw_resize || mCursor == eCursor_se_resize) {
+            SetCursor(eCursor_standard);
         }
     }
 
@@ -4078,16 +4082,17 @@ nsWindow::Create(nsIWidget* aParent,
         }
     }
 
+    // When CSD is enabled the mShell window with decorations extend
+    // the mContainerwindow so we need to handle mShell evets as well.
+    if (eventWidget && mIsCSDAvailable) {
+        eventWidget = mShell;
+    }
+
     if (eventWidget) {
 #if (MOZ_WIDGET_GTK == 2)
         // Don't let GTK mess with the shapes of our GdkWindows
         GTK_PRIVATE_SET_FLAG(eventWidget, GTK_HAS_SHAPE_MASK);
 #endif
-        // When CSD is enabled the decoration (shadows) extends the mShell
-        // window so we need to handle mShell evets as well.
-        if (mIsCSDAvailable) {
-            eventWidget = mShell;
-        }
         // These events are sent to the owning widget of the relevant window
         // and propagate up to the first widget that handles the events, so we
         // need only connect on mShell, if it exists, to catch events on its

@@ -11,6 +11,13 @@
 #include <gtk/gtk.h>
 #include "gtkdrawing.h"
 
+
+typedef unsigned StyleFlags;
+enum : StyleFlags {
+  NO_STYLE_FLAGS,
+  WHATEVER_MIGHT_BE_NEEDED = 1U << 0,
+};
+
 GtkWidget*
 GetWidget(WidgetNodeType aNodeType);
 
