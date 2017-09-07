@@ -11,14 +11,6 @@
 #include <gtk/gtk.h>
 #include "gtkdrawing.h"
 
-
-typedef unsigned StyleFlags;
-enum : StyleFlags {
-  NO_STYLE_FLAGS,
-  /* Sets the "maximized" style class on the window. */
-  MOZ_WINDOW_MAXIMIZED = 1U << 0,
-};
-
 GtkWidget*
 GetWidget(WidgetNodeType aNodeType);
 

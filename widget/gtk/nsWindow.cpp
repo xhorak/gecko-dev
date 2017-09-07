@@ -4096,12 +4096,12 @@ nsWindow::Create(nsIWidget* aParent,
                          G_CALLBACK(enter_notify_event_cb), nullptr);
         g_signal_connect(eventWidget, "leave-notify-event",
                          G_CALLBACK(leave_notify_event_cb), nullptr);
-         g_signal_connect(eventWidget, "motion-notify-event",
-                          G_CALLBACK(motion_notify_event_cb), nullptr);
-         g_signal_connect(eventWidget, "button-press-event",
-                          G_CALLBACK(button_press_event_cb), nullptr);
-         g_signal_connect(eventWidget, "button-release-event",
-                          G_CALLBACK(button_release_event_cb), nullptr);
+        g_signal_connect(eventWidget, "motion-notify-event",
+                         G_CALLBACK(motion_notify_event_cb), nullptr);
+        g_signal_connect(eventWidget, "button-press-event",
+                         G_CALLBACK(button_press_event_cb), nullptr);
+        g_signal_connect(eventWidget, "button-release-event",
+                         G_CALLBACK(button_release_event_cb), nullptr);
         g_signal_connect(eventWidget, "property-notify-event",
                          G_CALLBACK(property_notify_event_cb), nullptr);
         g_signal_connect(eventWidget, "scroll-event",

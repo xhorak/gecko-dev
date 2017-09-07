@@ -553,13 +553,13 @@ CreateHeaderBar(bool aMaximized)
   gtk_style_context_add_class(style, MOZ_GTK_STYLE_CLASS_TITLEBAR);
   // "default-decoration" is a selector for widgets in titlebar
   gtk_style_context_add_class(style, "default-decoration");
-
+/*
   if (aMaximized) {
     // TODO - is enough to set "maximized" on title bar widget
     // or do we need to add "maximized" to window container?
     gtk_style_context_add_class(style, "maximized");
   }
-
+*/
   return widget;
 }
 

@@ -103,11 +103,6 @@ typedef enum {
   MOZ_GTK_TAB_SELECTED        = 1 << 10
 } GtkTabFlags;
 
-// Flags used when drawing window decorations.
-typedef enum {
-  MOZ_GTK_CSD_MAXIMIZED = 1 << 1
-} GtkCSDFlags;
-
 /*** result/error codes ***/
 #define MOZ_GTK_SUCCESS 0
 #define MOZ_GTK_UNKNOWN_WIDGET -1
