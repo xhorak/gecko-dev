@@ -2371,11 +2371,6 @@ moz_gtk_get_widget_border(WidgetNodeType widget, gint* left, gint* top,
 
             return MOZ_GTK_SUCCESS;
         }
-    case MOZ_GTK_WINDOW_DECORATION:
-        {
-            moz_gtk_get_window_border(top, right, bottom, left);
-            return MOZ_GTK_SUCCESS;
-        }
     case MOZ_GTK_HEADER_BAR:
     case MOZ_GTK_HEADER_BAR_MAXIMIZED:
         {

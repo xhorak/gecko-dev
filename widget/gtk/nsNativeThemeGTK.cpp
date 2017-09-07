@@ -701,17 +701,6 @@ nsNativeThemeGTK::GetGtkWidgetAndState(uint8_t aWidgetType, nsIFrame* aFrame,
   case NS_THEME_DIALOG:
     aGtkWidgetType = MOZ_GTK_WINDOW;
     break;
-  case NS_THEME_GTK_WINDOW_DECORATION:
-    {
-      nsWindow* window = static_cast<nsWindow*>(aFrame->GetNearestWidget());
-      if (window && window->IsComposited()) {
-        aGtkWidgetType = MOZ_GTK_WINDOW_DECORATION;
-      } else {
-        // We support decorations on composited screens only.
-        return false;
-      }
-      break;
-    }
   case NS_THEME_GTK_INFO_BAR:
     aGtkWidgetType = MOZ_GTK_INFO_BAR;
     break;

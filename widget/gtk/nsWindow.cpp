@@ -1612,6 +1612,10 @@ nsWindow::SetCursor(nsCursor aCursor)
                 return;
 
             gdk_window_set_cursor(gtk_widget_get_window(GTK_WIDGET(mContainer)), newCursor);
+            if (IsClientDecorated()) {
+                gdk_window_set_cursor(gtk_widget_get_window(GTK_WIDGET(mShell)),
+                                      newCursor);
+            }
         }
     }
 }
@@ -1668,6 +1672,10 @@ nsWindow::SetCursor(imgIContainer* aCursor,
     if (cursor) {
         if (mContainer) {
             gdk_window_set_cursor(gtk_widget_get_window(GTK_WIDGET(mContainer)), cursor);
+            if (IsClientDecorated()) {
+                gdk_window_set_cursor(gtk_widget_get_window(GTK_WIDGET(mShell)),
+                                      cursor);
+            }
             rv = NS_OK;
         }
 #if (MOZ_WIDGET_GTK == 3)
@@ -2592,45 +2600,50 @@ nsWindow::OnMotionNotifyEvent(GdkEventMotion *aEvent)
         }
     }
 #endif /* MOZ_X11 */
-/*
-    GdkWindowEdge edge;
-    if (CheckResizerEdge(GetRefPoint(this, aEvent), edge)) {
-        nsCursor cursor = eCursor_none;
-        switch (edge) {
-        case GDK_WINDOW_EDGE_NORTH:
-            cursor = eCursor_n_resize;
-            break;
-        case GDK_WINDOW_EDGE_NORTH_WEST:
-            cursor = eCursor_nw_resize;
-            break;
-        case GDK_WINDOW_EDGE_NORTH_EAST:
-            cursor = eCursor_ne_resize;
-            break;
-        case GDK_WINDOW_EDGE_WEST:
-            cursor = eCursor_w_resize;
-            break;
-        case GDK_WINDOW_EDGE_EAST:
-            cursor = eCursor_e_resize;
-            break;
-        case GDK_WINDOW_EDGE_SOUTH:
-            cursor = eCursor_s_resize;
-            break;
-        case GDK_WINDOW_EDGE_SOUTH_WEST:
-            cursor = eCursor_sw_resize;
-            break;
-        case GDK_WINDOW_EDGE_SOUTH_EAST:
-            cursor = eCursor_se_resize;
-            break;
-        }
-        SetCursor(cursor);
-        return;
-    } else {
-        TODO -> fix that!
-        if (mCursor !=  eCursor_standard) {
-            SetCursor(eCursor_standard);
+    // Client is decorated and we're getting the motion event for mShell
+    // window which draws the CSD decorations around mContainer.
+    if (IsClientDecorated() && aEvent->window == gtk_widget_get_window(mShell)) {
+        GdkWindowEdge edge;
+        LayoutDeviceIntPoint refPoint =
+            GdkEventCoordsToDevicePixels(aEvent->x, aEvent->y);
+        if (CheckResizerEdge(refPoint, edge)) {
+            nsCursor cursor = eCursor_none;
+            switch (edge) {
+            case GDK_WINDOW_EDGE_NORTH:
+                cursor = eCursor_n_resize;
+                break;
+            case GDK_WINDOW_EDGE_NORTH_WEST:
+                cursor = eCursor_nw_resize;
+                break;
+            case GDK_WINDOW_EDGE_NORTH_EAST:
+                cursor = eCursor_ne_resize;
+                break;
+            case GDK_WINDOW_EDGE_WEST:
+                cursor = eCursor_w_resize;
+                break;
+            case GDK_WINDOW_EDGE_EAST:
+                cursor = eCursor_e_resize;
+                break;
+            case GDK_WINDOW_EDGE_SOUTH:
+                cursor = eCursor_s_resize;
+                break;
+            case GDK_WINDOW_EDGE_SOUTH_WEST:
+                cursor = eCursor_sw_resize;
+                break;
+            case GDK_WINDOW_EDGE_SOUTH_EAST:
+                cursor = eCursor_se_resize;
+                break;
+            }
+            SetCursor(cursor);
+            return;
+        } else {
+            //TODO -> fix that!
+            if (mCursor !=  eCursor_standard) {
+                SetCursor(eCursor_standard);
+            }
         }
     }
-*/
+
     WidgetMouseEvent event(true, eMouseMove, this, WidgetMouseEvent::eReal);
 
     gdouble pressure = 0;
@@ -2799,17 +2812,21 @@ nsWindow::OnButtonPressEvent(GdkEventButton *aEvent)
     // check to see if we should rollup
     if (CheckForRollup(aEvent->x_root, aEvent->y_root, false, false))
         return;
-/*
-    // Check to see if the event is within our window's resize region
-    GdkWindowEdge edge;
-    if (CheckResizerEdge(GetRefPoint(this, aEvent), edge)) {
-        gdk_window_begin_resize_drag(gtk_widget_get_window(mShell),
-                                     edge, aEvent->button,
-                                     aEvent->x_root, aEvent->y_root,
-                                     aEvent->time);
-        return;
+
+    if (IsClientDecorated() && aEvent->window == gtk_widget_get_window(mShell)) {
+        // Check to see if the event is within our window's resize region
+        GdkWindowEdge edge;
+        LayoutDeviceIntPoint refPoint =
+            GdkEventCoordsToDevicePixels(aEvent->x, aEvent->y);
+        if (CheckResizerEdge(refPoint, edge)) {
+            gdk_window_begin_resize_drag(gtk_widget_get_window(mShell),
+                                         edge, aEvent->button,
+                                         aEvent->x_root, aEvent->y_root,
+                                         aEvent->time);
+            return;
+        }
     }
-*/
+
     gdouble pressure = 0;
     gdk_event_get_axis ((GdkEvent*)aEvent, GDK_AXIS_PRESSURE, &pressure);
     mLastMotionPressure = pressure;
@@ -3851,6 +3868,9 @@ nsWindow::Create(nsIWidget* aParent,
         // Set up event widget
         eventWidget = drawToContainer ? container : mShell;
         gtk_widget_add_events(eventWidget, kEvents);
+        if (mIsCSDAvailable) {
+            gtk_widget_add_events(mShell, kEvents);
+        }
 
         gtk_container_add(GTK_CONTAINER(mShell), container);
         gtk_widget_realize(container);
@@ -3937,6 +3957,11 @@ nsWindow::Create(nsIWidget* aParent,
 
     // label the drawing window with this object so we can find our way home
     g_object_set_data(G_OBJECT(mGdkWindow), "nsWindow", this);
+    if (mIsCSDAvailable) {
+        // label the CSD window with this object so we can find our way home
+        g_object_set_data(G_OBJECT(gtk_widget_get_window(mShell)),
+                          "nsWindow", this);
+    }
 
     if (mContainer)
         g_object_set_data(G_OBJECT(mContainer), "nsWindow", this);
@@ -4058,7 +4083,11 @@ nsWindow::Create(nsIWidget* aParent,
         // Don't let GTK mess with the shapes of our GdkWindows
         GTK_PRIVATE_SET_FLAG(eventWidget, GTK_HAS_SHAPE_MASK);
 #endif
-
+        // When CSD is enabled the decoration (shadows) extends the mShell
+        // window so we need to handle mShell evets as well.
+        if (mIsCSDAvailable) {
+            eventWidget = mShell;
+        }
         // These events are sent to the owning widget of the relevant window
         // and propagate up to the first widget that handles the events, so we
         // need only connect on mShell, if it exists, to catch events on its
@@ -4067,12 +4096,12 @@ nsWindow::Create(nsIWidget* aParent,
                          G_CALLBACK(enter_notify_event_cb), nullptr);
         g_signal_connect(eventWidget, "leave-notify-event",
                          G_CALLBACK(leave_notify_event_cb), nullptr);
-        g_signal_connect(eventWidget, "motion-notify-event",
-                         G_CALLBACK(motion_notify_event_cb), nullptr);
-        g_signal_connect(eventWidget, "button-press-event",
-                         G_CALLBACK(button_press_event_cb), nullptr);
-        g_signal_connect(eventWidget, "button-release-event",
-                         G_CALLBACK(button_release_event_cb), nullptr);
+         g_signal_connect(eventWidget, "motion-notify-event",
+                          G_CALLBACK(motion_notify_event_cb), nullptr);
+         g_signal_connect(eventWidget, "button-press-event",
+                          G_CALLBACK(button_press_event_cb), nullptr);
+         g_signal_connect(eventWidget, "button-release-event",
+                          G_CALLBACK(button_release_event_cb), nullptr);
         g_signal_connect(eventWidget, "property-notify-event",
                          G_CALLBACK(property_notify_event_cb), nullptr);
         g_signal_connect(eventWidget, "scroll-event",
@@ -7010,13 +7039,7 @@ nsWindow::UpdateClientDecorations()
   if (IsClientDecorated()) {
       moz_gtk_get_window_border(&top, &right, &bottom, &left);
   }
-/*
-  static auto sGdkWindowSetShadowWidth =
-    (void (*)(GdkWindow*, gint, gint, gint, gint))
-    dlsym(RTLD_DEFAULT, "gdk_window_set_shadow_width");
-  sGdkWindowSetShadowWidth(gtk_widget_get_window(mShell),
-                           left, right, top, bottom);
-*/
+
   // TODO -> fails when mContainer allocation is wrong because calls resize
   gtk_widget_set_margin_left(GTK_WIDGET(mContainer), left);
   gtk_widget_set_margin_right(GTK_WIDGET(mContainer), right);
@@ -7034,15 +7057,9 @@ nsWindow::UpdateClientDecorations()
 bool
 nsWindow::CheckResizerEdge(LayoutDeviceIntPoint aPoint, GdkWindowEdge& aOutEdge)
 {
-  // We only need to handle resizers when using CSD.
-  if (!IsClientDecorated())
-    return false;
-
   gint left, top, right, bottom;
+  moz_gtk_get_window_border(&left, &top, &right, &bottom);
 
-  WidgetNodeType type = MOZ_GTK_WINDOW_DECORATION;
-  Unused << moz_gtk_get_widget_border(type, &left, &top, &right, &bottom,
-                                      GTK_TEXT_DIR_LTR);
   gint scale = GdkScaleFactor();
   left *= scale;
   top *= scale;
