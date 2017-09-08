@@ -30,13 +30,9 @@ CreateWindowWidget(WidgetNodeType type)
 {
   GtkWidget *widget = gtk_window_new(GTK_WINDOW_POPUP);
   gtk_widget_set_name(widget, "MozillaGtkWidget");
-  GtkStyleContext* style = gtk_widget_get_style_context(widget);
-  switch (type) {
-  case MOZ_GTK_WINDOW_CSD:
-    gtk_style_context_add_class(style, "csd");
-    break;
-  default:
-    break;
+  if (type == MOZ_GTK_WINDOW_CSD) {
+      GtkStyleContext* style = gtk_widget_get_style_context(widget);
+      gtk_style_context_add_class(style, "csd");
   }
   return widget;
 }
@@ -546,21 +542,27 @@ CreateHeaderBar(bool aMaximized)
     dlsym(RTLD_DEFAULT, "gtk_header_bar_new");
   static const char* MOZ_GTK_STYLE_CLASS_TITLEBAR = "titlebar";
 
-  GtkWidget* widget = sGtkHeaderBarNewPtr();
-  AddToWindowContainer(widget);
-
-  GtkStyleContext* style = gtk_widget_get_style_context(widget);
-  gtk_style_context_add_class(style, MOZ_GTK_STYLE_CLASS_TITLEBAR);
-  // "default-decoration" is a selector for widgets in titlebar
-  gtk_style_context_add_class(style, "default-decoration");
-/*
+  GtkWidget* headerbar = sGtkHeaderBarNewPtr();
   if (aMaximized) {
-    // TODO - is enough to set "maximized" on title bar widget
-    // or do we need to add "maximized" to window container?
+    GtkWidget *window = gtk_window_new(GTK_WINDOW_POPUP);
+    gtk_widget_set_name(window, "MozillaMaximizedGtkWidget");
+    GtkStyleContext* style = gtk_widget_get_style_context(window);
     gtk_style_context_add_class(style, "maximized");
+    GtkWidget *fixed = gtk_fixed_new();
+    gtk_container_add(GTK_CONTAINER(window), fixed);
+    gtk_container_add(GTK_CONTAINER(fixed), headerbar);
+    // Save the window container so we don't leak it.
+    sWidgetStorage[MOZ_GTK_WINDOW_MAXIMIZED] = window;
+  } else {
+    AddToWindowContainer(headerbar);
   }
-*/
-  return widget;
+
+  // Emulate what create_titlebar() at gtkwindow.c does.
+  GtkStyleContext* style = gtk_widget_get_style_context(headerbar);
+  gtk_style_context_add_class(style, MOZ_GTK_STYLE_CLASS_TITLEBAR);
+  gtk_style_context_add_class(style, "default-decoration");
+
+  return headerbar;
 }
 
 static GtkWidget*
@@ -1289,6 +1291,8 @@ ResetWidgetCache(void)
   /* This will destroy all of our widgets */
   if (sWidgetStorage[MOZ_GTK_WINDOW])
     gtk_widget_destroy(sWidgetStorage[MOZ_GTK_WINDOW]);
+  if (sWidgetStorage[MOZ_GTK_WINDOW_MAXIMIZED])
+    gtk_widget_destroy(sWidgetStorage[MOZ_GTK_WINDOW_MAXIMIZED]);
 
   /* Clear already freed arrays */
   mozilla::PodArrayZero(sWidgetStorage);
