@@ -7035,21 +7035,34 @@ nsWindow::GetClientResizerSize()
 void
 nsWindow::UpdateClientDecorations()
 {
-  if (!mIsCSDAvailable)
+  if (!mDrawWindowDecoration)
       return;
 
-  // Shadows are only used for normal, non-solid client windows with CSD
-  // and we need to reset them for maximized windows.
   gint top = 0, right = 0, bottom = 0, left = 0;
-  if (IsClientDecorated()) {
+  if (mSizeState == nsSizeMode_Normal) {
       moz_gtk_get_window_border(&top, &right, &bottom, &left);
   }
 
-  // TODO -> fails when mContainer allocation is wrong because calls resize
-  gtk_widget_set_margin_left(GTK_WIDGET(mContainer), left);
-  gtk_widget_set_margin_right(GTK_WIDGET(mContainer), right);
-  gtk_widget_set_margin_top(GTK_WIDGET(mContainer), top);
-  gtk_widget_set_margin_bottom(GTK_WIDGET(mContainer), bottom);
+  if (mBounds.width < left+right || mBounds.height < top+bottom) {
+      // Gtk+ doesn't like when we set margin bigger than our size.
+      // That happens when we're called from nsWindow::SetDrawsInTitlebar()
+      // at start when the mShell/mContainer is not allocated/resized yet.
+      return;
+  }
+
+  // gtk_widget_set_margin_*() launches resize machinery so
+  // call it only when the margin actually changes.
+  if (gtk_widget_get_margin_left(GTK_WIDGET(mContainer)) != left)
+      gtk_widget_set_margin_left(GTK_WIDGET(mContainer), left);
+
+  if (gtk_widget_get_margin_right(GTK_WIDGET(mContainer)) != right)
+      gtk_widget_set_margin_right(GTK_WIDGET(mContainer), right);
+
+  if (gtk_widget_get_margin_top(GTK_WIDGET(mContainer)) != top)
+      gtk_widget_set_margin_top(GTK_WIDGET(mContainer), top);
+
+  if (gtk_widget_get_margin_bottom(GTK_WIDGET(mContainer)) != bottom)
+      gtk_widget_set_margin_bottom(GTK_WIDGET(mContainer), bottom);
 
 /*  TODO -> save to optimiza calls
   mWindowDecorationSize.left = left;

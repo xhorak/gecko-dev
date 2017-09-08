@@ -606,6 +606,10 @@ STUB(gtk_widget_set_margin_left)
 STUB(gtk_widget_set_margin_right)
 STUB(gtk_widget_set_margin_top)
 STUB(gtk_widget_set_margin_bottom)
+STUB(gtk_widget_get_margin_left)
+STUB(gtk_widget_get_margin_right)
+STUB(gtk_widget_get_margin_top)
+STUB(gtk_widget_get_margin_bottom)
 #endif
 
 #ifdef GTK2_SYMBOLS
