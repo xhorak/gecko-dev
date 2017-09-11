@@ -870,6 +870,7 @@ nsLookAndFeel::GetIntImpl(IntID aID, int32_t &aResult)
         aResult = 2;
         break;
     case eIntID_GTKCSDAvailable:
+        EnsureInit();
         aResult = sCSDAvailable;
         break;
     default:

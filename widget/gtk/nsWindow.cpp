@@ -444,7 +444,7 @@ nsWindow::nsWindow()
 
     mContainer           = nullptr;
     mGdkWindow           = nullptr;
-    mIsCSDAvailable      = false;
+    mIsCSDEnabled        = false;
     mShell               = nullptr;
     mCompositorWidgetDelegate = nullptr;
     mHasMappedToplevel   = false;
@@ -2448,6 +2448,14 @@ nsWindow::OnSizeAllocate(GtkAllocation *aAllocation)
          (void *)this, aAllocation->x, aAllocation->y,
          aAllocation->width, aAllocation->height));
 
+    // We need to apply to CSD margin before mBounds.Size() == size to
+    // add extra space around container.
+    // TODO - resize/reflow our internal widgets - it may cut upper part of content.
+    if (mDecorationSizeChanged) {
+       UpdateClientDecorationWindow();
+       mDecorationSizeChanged = false;
+    }
+
     LayoutDeviceIntSize size = GdkRectToDevicePixels(*aAllocation).Size();
 
     if (mBounds.Size() == size)
@@ -2484,11 +2492,6 @@ nsWindow::OnSizeAllocate(GtkAllocation *aAllocation)
     mNeedsDispatchResized = true;
     NS_DispatchToCurrentThread(NewRunnableMethod(
       "nsWindow::MaybeDispatchResized", this, &nsWindow::MaybeDispatchResized));
-
-    if (mDecorationSizeChanged) {
-        UpdateClientDecorationWindow();
-        mDecorationSizeChanged = false;
-    }
 }
 
 void
@@ -3731,11 +3734,11 @@ nsWindow::Create(nsIWidget* aParent,
         // When CSD is available we can emulate it for toplevel windows.
         // Content is rendered to mContainer and transparent decorations to mShell.
         if (mWindowType == eWindowType_toplevel) {
-            int32_t isCSDAvailable = -1;
+            int32_t isCSDAvailable = false;
             nsresult rv = LookAndFeel::GetInt(LookAndFeel::eIntID_GTKCSDAvailable,
                                              &isCSDAvailable);
             if (NS_SUCCEEDED(rv)) {
-                mIsCSDAvailable = useAlphaVisual = isCSDAvailable;
+                mIsCSDEnabled = useAlphaVisual = isCSDAvailable;
             }
         } else
 #endif
@@ -3859,30 +3862,59 @@ nsWindow::Create(nsIWidget* aParent,
         mContainer = MOZ_CONTAINER(container);
 
 #if (MOZ_WIDGET_GTK == 3)
+        /* There are tree possible situations here:
+         *
+         * 1) We're running on Gtk+ < 3.20 without any decorations. Content
+         *    is rendered to mShell window and we listen Gtk+ events on mShell.
+         * 2) We're running on Gtk+ > 3.20 and window decorations are drawn
+         *    by default by Gtk+. Content is rendered to mContainer,
+         *    we listen events on mContainer. mShell contains default Gtk+
+         *    window decorations rendered by Gtk+.
+         * 3) We're running on Gtk+ > 3.20 and both window decorations and
+         *    content is rendered by gecko. We emulate Gtk+ decoration rendering
+         *    to mShell and we need to listen Gtk events on both mShell
+         *    and mContainer.
+         */
+
         // When client side decorations are enabled (rendered by us or by Gtk+)
         // the decoration is rendered to mShell (toplevel) window and
         // we draw our content to mContainer.
-        drawToContainer = mIsCSDAvailable;
+        if (mIsCSDEnabled) {
+            drawToContainer = true;
+        } else {
+            // mIsCSDEnabled can be disabled by preference so look at actual
+            // toplevel window style to to detect active "csd" style.
+            // The "csd" style is set when widget is realized so we need to call
+            // it explicitly now.
+            gtk_widget_realize(mShell);
+
+            GtkStyleContext* style = gtk_widget_get_style_context(mShell);
+            drawToContainer = gtk_style_context_has_class(style, "csd");
+            // TODO -> csd style is not detected!!
+        }
 #endif
         drawWidget = (drawToContainer) ? container : mShell;
         // When we draw decorations on our own we need to handle resize events
         // because Gtk+ does not provide resizers for undecorated windows.
         // The CSD on mShell borders act as resize handlers
         // so we need to listen there.
-        eventWidget = (mIsCSDAvailable) ? mShell : container;
+        eventWidget = (drawToContainer && !mIsCSDEnabled) ? container : mShell;
+
+        gtk_widget_add_events(eventWidget, kEvents);
+        if (eventWidget != drawWidget) {
+            // CSD is rendered by us (not by Gtk+) so we also need to listen
+            // at mShell window for events.
+            gtk_widget_add_events(drawWidget, kEvents);
+        }
 
         // Prevent GtkWindow from painting a background to flicker.
         gtk_widget_set_app_paintable(drawWidget, TRUE);
 
-        gtk_widget_add_events(eventWidget, kEvents);
-        if (eventWidget != drawWidget) {
-            // eventWidget != drawWidget in on CSD and we need to listen
-            // on both widgets.
-            gtk_widget_add_events(drawWidget, kEvents);
-        }
+        // gtk_container_add() realizes the child widget so we need to
+        // set it now.
+        gtk_widget_set_has_window(container, drawToContainer);
 
         gtk_container_add(GTK_CONTAINER(mShell), container);
-        gtk_widget_set_has_window(container, drawToContainer);
         gtk_widget_realize(container);
 
         // make sure this is the focus widget in the container
@@ -3963,7 +3995,7 @@ nsWindow::Create(nsIWidget* aParent,
 
     // label the drawing window with this object so we can find our way home
     g_object_set_data(G_OBJECT(mGdkWindow), "nsWindow", this);
-    if (mIsCSDAvailable) {
+    if (mIsCSDEnabled) {
         // label the CSD window with this object so we can find our way home
         g_object_set_data(G_OBJECT(gtk_widget_get_window(mShell)),
                           "nsWindow", this);
@@ -4029,7 +4061,7 @@ nsWindow::Create(nsIWidget* aParent,
 #else
         g_signal_connect(G_OBJECT(mContainer), "draw",
                          G_CALLBACK(expose_event_cb), nullptr);
-        if (mIsCSDAvailable) {
+        if (mIsCSDEnabled) {
             g_signal_connect(G_OBJECT(mShell), "draw",
                             G_CALLBACK(expose_event_decoration_draw_cb), nullptr);
         }
@@ -6726,7 +6758,7 @@ nsWindow::SetNonClientMargins(LayoutDeviceIntMargin &aMargins)
 void
 nsWindow::SetDrawsInTitlebar(bool aState)
 {
-  if (!mIsCSDAvailable || aState == mDrawWindowDecoration)
+  if (!mIsCSDEnabled || aState == mDrawWindowDecoration)
     return;
 
   if (mShell) {
@@ -7041,6 +7073,12 @@ nsWindow::UpdateClientDecorations()
       // header bar and don't do any shadows rendering.
       moz_gtk_get_window_border(&top, &right, &bottom, &left);
   }
+
+  static auto sGdkWindowSetShadowWidth =
+     (void (*)(GdkWindow*, gint, gint, gint, gint))
+     dlsym(RTLD_DEFAULT, "gdk_window_set_shadow_width");
+  sGdkWindowSetShadowWidth(gtk_widget_get_window(mShell),
+                           left, right, top, bottom);
 
   mDecorationSize.left = left;
   mDecorationSize.right = right;

@@ -455,7 +455,7 @@ private:
     GtkWidget          *mShell;
     MozContainer       *mContainer;
     GdkWindow          *mGdkWindow;
-    bool                mIsCSDAvailable;
+    bool                mIsCSDEnabled;
     PlatformCompositorWidgetDelegate* mCompositorWidgetDelegate;
 
 
