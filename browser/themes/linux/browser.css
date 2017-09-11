@@ -809,11 +809,11 @@ html|span.ac-emphasize-text-url {
   #main-window[tabsintitlebar][sizemode="normal"]:not([customizing]):not(:-moz-lwtheme) > #titlebar {
     -moz-appearance: -moz-window-titlebar;
   }
-/*  
+
   #main-window[tabsintitlebar][sizemode="maximized"]:not([customizing]):not(:-moz-lwtheme) > #titlebar {
     -moz-appearance: -moz-window-titlebar-maximized;
   }
-*/  
+
   #main-window[tabsintitlebar]:not([sizemode="fullscreen"]) #TabsToolbar {
     -moz-appearance: none;
   }

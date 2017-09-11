@@ -487,6 +487,7 @@ nsWindow::nsWindow()
 #endif
     mPendingConfigures = 0;
     mDrawWindowDecoration = false;
+    mDecorationSize = {0,0,0,0};
 }
 
 nsWindow::~nsWindow()
@@ -3671,6 +3672,7 @@ nsWindow::Create(nsIWidget* aParent,
     GtkWindow      *topLevelParent = nullptr;
     nsWindow       *parentnsWindow = nullptr;
     GtkWidget      *eventWidget = nullptr;
+    GtkWidget      *drawWidget = nullptr;
     bool            drawToContainer = false;
 
     if (aParent) {
@@ -3720,10 +3722,8 @@ nsWindow::Create(nsIWidget* aParent,
 
         bool useAlphaVisual = false;
 #if (MOZ_WIDGET_GTK == 3)
-        // When CSD is available we emulate it for toplevel windows.
-        // Content is rendered to container and transparent decorations to mShell.
-        // The mShell visual can be changed later on "composited-changed" signal
-        // but we have to create mShell/mContainer GdkWindows now.
+        // When CSD is available we can emulate it for toplevel windows.
+        // Content is rendered to mContainer and transparent decorations to mShell.
         if (mWindowType == eWindowType_toplevel) {
             int32_t isCSDAvailable = -1;
             nsresult rv = LookAndFeel::GetInt(LookAndFeel::eIntID_GTKCSDAvailable,
@@ -3733,7 +3733,7 @@ nsWindow::Create(nsIWidget* aParent,
             }
         } else
 #endif
-        if (mWindowType == eWindowType_popup){
+        if (mWindowType == eWindowType_popup) {
             useAlphaVisual = aInitData->mSupportTranslucency;
         }
 
@@ -3849,34 +3849,34 @@ nsWindow::Create(nsIWidget* aParent,
         }
 
         // Create a container to hold child windows and child GtkWidgets.
-        bool drawToContainer = false;
         GtkWidget *container = moz_container_new();
         mContainer = MOZ_CONTAINER(container);
 
 #if (MOZ_WIDGET_GTK == 3)
         // When client side decorations are enabled (rendered by us or by Gtk+)
         // the decoration is rendered to mShell (toplevel) window and
-        // we use container with GdkWindow to draw our content.
+        // we draw our content to mContainer.
         drawToContainer = mIsCSDAvailable;
 #endif
-        if (drawToContainer) {
-            gtk_widget_set_app_paintable(GTK_WIDGET(mContainer), TRUE);
-        } else {
-            // Prevent GtkWindow from painting a background to flicker.
-            gtk_widget_set_app_paintable(mShell, TRUE);
+        drawWidget = (drawToContainer) ? container : mShell;
+        // When we draw decorations on our own we need to handle resize events
+        // because Gtk+ does not provide resizers for undecorated windows.
+        // The CSD on mShell borders act as resize handlers
+        // so we need to listen there.
+        eventWidget = (mIsCSDAvailable) ? mShell : container;
 
-            // Use mShell's window for drawing and events.
-            gtk_widget_set_has_window(container, FALSE);
-        }
+        // Prevent GtkWindow from painting a background to flicker.
+        gtk_widget_set_app_paintable(drawWidget, TRUE);
 
-        // Set up event widget
-        eventWidget = drawToContainer ? container : mShell;
         gtk_widget_add_events(eventWidget, kEvents);
-        if (mIsCSDAvailable) {
-            gtk_widget_add_events(mShell, kEvents);
+        if (eventWidget != drawWidget) {
+            // eventWidget != drawWidget in on CSD and we need to listen
+            // on both widgets.
+            gtk_widget_add_events(drawWidget, kEvents);
         }
 
         gtk_container_add(GTK_CONTAINER(mShell), container);
+        gtk_widget_set_has_window(container, drawToContainer);
         gtk_widget_realize(container);
 
         // make sure this is the focus widget in the container
@@ -3884,12 +3884,8 @@ nsWindow::Create(nsIWidget* aParent,
         gtk_widget_grab_focus(container);
 
         // the drawing window
-        mGdkWindow = gtk_widget_get_window(eventWidget);
-/*
-        GtkWidget *tmp = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-        gtk_widget_realize(tmp);
-        mGdkWindow = gtk_widget_get_window(tmp);
-*/
+        mGdkWindow = gtk_widget_get_window(drawWidget);
+
         if (mWindowType == eWindowType_popup) {
             // gdk does not automatically set the cursor for "temporary"
             // windows, which are what gtk uses for popups.
@@ -4080,12 +4076,6 @@ nsWindow::Create(nsIWidget* aParent,
         if (container) {
             mIMContext = container->mIMContext;
         }
-    }
-
-    // When CSD is enabled the mShell window with decorations extend
-    // the mContainerwindow so we need to handle mShell evets as well.
-    if (eventWidget && mIsCSDAvailable) {
-        eventWidget = mShell;
     }
 
     if (eventWidget) {
@@ -7042,14 +7032,14 @@ nsWindow::UpdateClientDecorations()
   if (mSizeState == nsSizeMode_Normal) {
       moz_gtk_get_window_border(&top, &right, &bottom, &left);
   }
-
+/*
   if (mBounds.width < left+right || mBounds.height < top+bottom) {
       // Gtk+ doesn't like when we set margin bigger than our size.
       // That happens when we're called from nsWindow::SetDrawsInTitlebar()
       // at start when the mShell/mContainer is not allocated/resized yet.
       return;
   }
-
+*/
   // gtk_widget_set_margin_*() launches resize machinery so
   // call it only when the margin actually changes.
   if (gtk_widget_get_margin_left(GTK_WIDGET(mContainer)) != left)
@@ -7064,25 +7054,20 @@ nsWindow::UpdateClientDecorations()
   if (gtk_widget_get_margin_bottom(GTK_WIDGET(mContainer)) != bottom)
       gtk_widget_set_margin_bottom(GTK_WIDGET(mContainer), bottom);
 
-/*  TODO -> save to optimiza calls
-  mWindowDecorationSize.left = left;
-  mWindowDecorationSize.right = right;
-  mWindowDecorationSize.top = top;
-  mWindowDecorationSize.bottom = bottom;
-*/
+  mDecorationSize.left = left;
+  mDecorationSize.right = right;
+  mDecorationSize.top = top;
+  mDecorationSize.bottom = bottom;
 }
 
 bool
 nsWindow::CheckResizerEdge(LayoutDeviceIntPoint aPoint, GdkWindowEdge& aOutEdge)
 {
-  gint left, top, right, bottom;
-  moz_gtk_get_window_border(&left, &top, &right, &bottom);
-
   gint scale = GdkScaleFactor();
-  left *= scale;
-  top *= scale;
-  right *= scale;
-  bottom *= scale;
+  gint left = scale * mDecorationSize.left;
+  gint top = scale * mDecorationSize.top;
+  gint right = scale * mDecorationSize.right;
+  gint bottom = scale * mDecorationSize.bottom;
 
   int resizerSize = GetClientResizerSize();
   int topDist = aPoint.y;
