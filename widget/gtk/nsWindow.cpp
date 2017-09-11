@@ -488,6 +488,7 @@ nsWindow::nsWindow()
     mPendingConfigures = 0;
     mDrawWindowDecoration = false;
     mDecorationSize = {0,0,0,0};
+    mDecorationSizeChanged = false;
 }
 
 nsWindow::~nsWindow()
@@ -2483,6 +2484,11 @@ nsWindow::OnSizeAllocate(GtkAllocation *aAllocation)
     mNeedsDispatchResized = true;
     NS_DispatchToCurrentThread(NewRunnableMethod(
       "nsWindow::MaybeDispatchResized", this, &nsWindow::MaybeDispatchResized));
+
+    if (mDecorationSizeChanged) {
+        UpdateClientDecorationWindow();
+        mDecorationSizeChanged = false;
+    }
 }
 
 void
@@ -7030,34 +7036,36 @@ nsWindow::UpdateClientDecorations()
 
   gint top = 0, right = 0, bottom = 0, left = 0;
   if (mSizeState == nsSizeMode_Normal) {
+      // TODO - possible optimization:
+      // When a theme sets CSD border size to 0 we can just disable Gtk+
+      // header bar and don't do any shadows rendering.
       moz_gtk_get_window_border(&top, &right, &bottom, &left);
   }
-/*
-  if (mBounds.width < left+right || mBounds.height < top+bottom) {
-      // Gtk+ doesn't like when we set margin bigger than our size.
-      // That happens when we're called from nsWindow::SetDrawsInTitlebar()
-      // at start when the mShell/mContainer is not allocated/resized yet.
-      return;
-  }
-*/
-  // gtk_widget_set_margin_*() launches resize machinery so
-  // call it only when the margin actually changes.
-  if (gtk_widget_get_margin_left(GTK_WIDGET(mContainer)) != left)
-      gtk_widget_set_margin_left(GTK_WIDGET(mContainer), left);
-
-  if (gtk_widget_get_margin_right(GTK_WIDGET(mContainer)) != right)
-      gtk_widget_set_margin_right(GTK_WIDGET(mContainer), right);
-
-  if (gtk_widget_get_margin_top(GTK_WIDGET(mContainer)) != top)
-      gtk_widget_set_margin_top(GTK_WIDGET(mContainer), top);
-
-  if (gtk_widget_get_margin_bottom(GTK_WIDGET(mContainer)) != bottom)
-      gtk_widget_set_margin_bottom(GTK_WIDGET(mContainer), bottom);
 
   mDecorationSize.left = left;
   mDecorationSize.right = right;
   mDecorationSize.top = top;
   mDecorationSize.bottom = bottom;
+
+  GtkAllocation allocation;
+  gtk_widget_get_allocation(GTK_WIDGET(mShell), &allocation);
+  if (allocation.width < left+right || allocation.height < top+bottom) {
+      // Gtk+ doesn't like when we set mContainer margin bigger than mShell
+      // window size. That happens when we're called by SetDrawsInTitlebar()
+      // early when the mShell/mContainer is not allocated/resized yet.
+      mDecorationSizeChanged = true;
+  } else {
+      UpdateClientDecorationWindow();
+  }
+}
+
+void
+nsWindow::UpdateClientDecorationWindow()
+{
+  gtk_widget_set_margin_left(GTK_WIDGET(mContainer), mDecorationSize.left);
+  gtk_widget_set_margin_right(GTK_WIDGET(mContainer), mDecorationSize.right);
+  gtk_widget_set_margin_top(GTK_WIDGET(mContainer), mDecorationSize.top);
+  gtk_widget_set_margin_bottom(GTK_WIDGET(mContainer), mDecorationSize.bottom);
 }
 
 bool
