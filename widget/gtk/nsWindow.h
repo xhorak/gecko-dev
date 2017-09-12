@@ -396,6 +396,7 @@ protected:
     // Informs the window manager about the size of the shadows surrounding
     // a client-side decorated window.
     void UpdateClientDecorations();
+    void UpdateClientDecorationWindow();
 
     // Returns true if the given point (in device pixels) is within a resizer
     // region of the window. Only used when drawing decorations client side.
