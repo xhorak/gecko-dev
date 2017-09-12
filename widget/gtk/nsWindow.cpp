@@ -4037,6 +4037,10 @@ nsWindow::Create(nsIWidget* aParent,
         g_signal_connect_after(default_settings,
                                "notify::gtk-font-name",
                                G_CALLBACK(theme_changed_cb), this);
+        if (mIsCSDEnabled) {
+            g_signal_connect(G_OBJECT(mShell), "draw",
+                             G_CALLBACK(expose_event_decoration_draw_cb), nullptr);
+        }
     }
 
     if (mContainer) {
@@ -4061,10 +4065,6 @@ nsWindow::Create(nsIWidget* aParent,
 #else
         g_signal_connect(G_OBJECT(mContainer), "draw",
                          G_CALLBACK(expose_event_cb), nullptr);
-        if (mIsCSDEnabled) {
-            g_signal_connect(G_OBJECT(mShell), "draw",
-                            G_CALLBACK(expose_event_decoration_draw_cb), nullptr);
-        }
 #endif
         g_signal_connect(mContainer, "focus_in_event",
                          G_CALLBACK(focus_in_event_cb), nullptr);
