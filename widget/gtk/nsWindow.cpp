@@ -2448,14 +2448,6 @@ nsWindow::OnSizeAllocate(GtkAllocation *aAllocation)
          (void *)this, aAllocation->x, aAllocation->y,
          aAllocation->width, aAllocation->height));
 
-    // We need to apply to CSD margin before mBounds.Size() == size to
-    // add extra space around container.
-    // TODO - resize/reflow our internal widgets - it may cut upper part of content.
-    if (mDecorationSizeChanged) {
-       UpdateClientDecorationWindow();
-       mDecorationSizeChanged = false;
-    }
-
     LayoutDeviceIntSize size = GdkRectToDevicePixels(*aAllocation).Size();
 
     if (mBounds.Size() == size)
@@ -3890,7 +3882,6 @@ nsWindow::Create(nsIWidget* aParent,
 
             GtkStyleContext* style = gtk_widget_get_style_context(mShell);
             drawToContainer = gtk_style_context_has_class(style, "csd");
-            // TODO -> csd style is not detected!!
         }
 #endif
         drawWidget = (drawToContainer) ? container : mShell;
@@ -4037,6 +4028,12 @@ nsWindow::Create(nsIWidget* aParent,
         g_signal_connect_after(default_settings,
                                "notify::gtk-font-name",
                                G_CALLBACK(theme_changed_cb), this);
+#if (MOZ_WIDGET_GTK == 3)
+        if (mIsCSDEnabled) {
+            g_signal_connect(G_OBJECT(mShell), "draw",
+                             G_CALLBACK(expose_event_decoration_draw_cb), nullptr);
+        }
+#endif
     }
 
     if (mContainer) {
@@ -4061,10 +4058,6 @@ nsWindow::Create(nsIWidget* aParent,
 #else
         g_signal_connect(G_OBJECT(mContainer), "draw",
                          G_CALLBACK(expose_event_cb), nullptr);
-        if (mIsCSDEnabled) {
-            g_signal_connect(G_OBJECT(mShell), "draw",
-                            G_CALLBACK(expose_event_decoration_draw_cb), nullptr);
-        }
 #endif
         g_signal_connect(mContainer, "focus_in_event",
                          G_CALLBACK(focus_in_event_cb), nullptr);
@@ -7089,21 +7082,15 @@ nsWindow::UpdateClientDecorations()
   gtk_widget_get_allocation(GTK_WIDGET(mShell), &allocation);
   if (allocation.width < left+right || allocation.height < top+bottom) {
       // Gtk+ doesn't like when we set mContainer margin bigger than mShell
-      // window size. That happens when we're called by SetDrawsInTitlebar()
-      // early when the mShell/mContainer is not allocated/resized yet.
-      mDecorationSizeChanged = true;
+      // window size. That happens when we're called early when
+      // the mShell/mContainer is not allocated/resized yet.
+      return;
   } else {
-      UpdateClientDecorationWindow();
+      gtk_widget_set_margin_left(GTK_WIDGET(mContainer), mDecorationSize.left);
+      gtk_widget_set_margin_right(GTK_WIDGET(mContainer), mDecorationSize.right);
+      gtk_widget_set_margin_top(GTK_WIDGET(mContainer), mDecorationSize.top);
+      gtk_widget_set_margin_bottom(GTK_WIDGET(mContainer), mDecorationSize.bottom);
   }
-}
-
-void
-nsWindow::UpdateClientDecorationWindow()
-{
-  gtk_widget_set_margin_left(GTK_WIDGET(mContainer), mDecorationSize.left);
-  gtk_widget_set_margin_right(GTK_WIDGET(mContainer), mDecorationSize.right);
-  gtk_widget_set_margin_top(GTK_WIDGET(mContainer), mDecorationSize.top);
-  gtk_widget_set_margin_bottom(GTK_WIDGET(mContainer), mDecorationSize.bottom);
 }
 
 bool
