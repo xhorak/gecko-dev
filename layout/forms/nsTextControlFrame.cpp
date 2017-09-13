@@ -36,7 +36,6 @@
 #include "nsIDOMText.h" //for multiline getselection
 #include "nsFocusManager.h"
 #include "nsPresState.h"
-#include "nsContentList.h"
 #include "nsAttrValueInlines.h"
 #include "mozilla/dom/Selection.h"
 #include "mozilla/TextEditRules.h"
@@ -1133,8 +1132,9 @@ nsTextControlFrame::SetInitialChildList(ChildListID     aListID,
 void
 nsTextControlFrame::SetValueChanged(bool aValueChanged)
 {
-  nsCOMPtr<nsITextControlElement> txtCtrl = do_QueryInterface(GetContent());
-  NS_ASSERTION(txtCtrl, "Content not a text control element");
+  nsCOMPtr<nsITextControlElement> txtCtrl =
+    GetContent()->GetAsTextControlElement();
+  MOZ_ASSERT(txtCtrl, "Content not a text control element");
 
   if (mUsePlaceholder) {
     AutoWeakFrame weakFrame(this);

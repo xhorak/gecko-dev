@@ -588,7 +588,7 @@ typedef enum JSFinalizeStatus {
 } JSFinalizeStatus;
 
 typedef void
-(* JSFinalizeCallback)(JSFreeOp* fop, JSFinalizeStatus status, bool isZoneGC, void* data);
+(* JSFinalizeCallback)(JSFreeOp* fop, JSFinalizeStatus status, void* data);
 
 typedef void
 (* JSWeakPointerZonesCallback)(JSContext* cx, void* data);
@@ -2104,14 +2104,6 @@ GetFirstArgumentAsTypeHint(JSContext* cx, CallArgs args, JSType *result);
 
 } /* namespace JS */
 
-extern JS_PUBLIC_API(bool)
-JS_PropertyStub(JSContext* cx, JS::HandleObject obj, JS::HandleId id,
-                JS::MutableHandleValue vp);
-
-extern JS_PUBLIC_API(bool)
-JS_StrictPropertyStub(JSContext* cx, JS::HandleObject obj, JS::HandleId id,
-                      JS::MutableHandleValue vp, JS::ObjectOpResult& result);
-
 template<typename T>
 struct JSConstScalarSpec {
     const char* name;
@@ -2261,10 +2253,6 @@ inline int CheckIsSetterOp(JSSetterOp op);
   (static_cast<void>(sizeof(JS::detail::CheckIsSetterOp(v))), \
    reinterpret_cast<JSNative>(v))
 
-#define JS_STUBGETTER JS_PROPERTYOP_GETTER(JS_PropertyStub)
-
-#define JS_STUBSETTER JS_PROPERTYOP_SETTER(JS_StrictPropertyStub)
-
 #define JS_PS_ACCESSOR_SPEC(name, getter, setter, flags, extraFlags) \
     { name, uint8_t(JS_CHECK_ACCESSOR_FLAGS(flags) | extraFlags), \
       { {  getter, setter  } } }
@@ -2290,6 +2278,9 @@ inline int CheckIsSetterOp(JSSetterOp op);
 #define JS_PSGS(name, getter, setter, flags) \
     JS_PS_ACCESSOR_SPEC(name, JSNATIVE_WRAPPER(getter), JSNATIVE_WRAPPER(setter), flags, \
                          JSPROP_SHARED)
+#define JS_SYM_GET(symbol, getter, flags) \
+    JS_PS_ACCESSOR_SPEC(reinterpret_cast<const char*>(uint32_t(::JS::SymbolCode::symbol) + 1), \
+                        JSNATIVE_WRAPPER(getter), JSNATIVE_WRAPPER(nullptr), flags, JSPROP_SHARED)
 #define JS_SELF_HOSTED_GET(name, getterName, flags) \
     JS_PS_ACCESSOR_SPEC(name, SELFHOSTED_WRAPPER(getterName), JSNATIVE_WRAPPER(nullptr), flags, \
                          JSPROP_SHARED | JSPROP_GETTER)
@@ -2905,8 +2896,6 @@ class WrappedPtrOperations<JS::PropertyDescriptor, Wrapper>
             MOZ_ASSERT(!hasAll(JSPROP_IGNORE_READONLY | JSPROP_READONLY));
             MOZ_ASSERT_IF(has(JSPROP_IGNORE_VALUE), value().isUndefined());
         }
-        MOZ_ASSERT(getter() != JS_PropertyStub);
-        MOZ_ASSERT(setter() != JS_StrictPropertyStub);
 
         MOZ_ASSERT_IF(has(JSPROP_RESOLVING), !has(JSPROP_IGNORE_ENUMERATE));
         MOZ_ASSERT_IF(has(JSPROP_RESOLVING), !has(JSPROP_IGNORE_PERMANENT));
@@ -2957,9 +2946,6 @@ class MutableWrappedPtrOperations<JS::PropertyDescriptor, Wrapper>
 
     void initFields(JS::HandleObject obj, JS::HandleValue v, unsigned attrs,
                     JSGetterOp getterOp, JSSetterOp setterOp) {
-        MOZ_ASSERT(getterOp != JS_PropertyStub);
-        MOZ_ASSERT(setterOp != JS_StrictPropertyStub);
-
         object().set(obj);
         value().set(v);
         setAttributes(attrs);
@@ -3020,11 +3006,9 @@ class MutableWrappedPtrOperations<JS::PropertyDescriptor, Wrapper>
     void setAttributes(unsigned attrs) { desc().attrs = attrs; }
 
     void setGetter(JSGetterOp op) {
-        MOZ_ASSERT(op != JS_PropertyStub);
         desc().getter = op;
     }
     void setSetter(JSSetterOp op) {
-        MOZ_ASSERT(op != JS_StrictPropertyStub);
         desc().setter = op;
     }
     void setGetterObject(JSObject* obj) {
@@ -3216,51 +3200,59 @@ JS_DefinePropertyById(JSContext* cx, JS::HandleObject obj, JS::HandleId id,
 
 extern JS_PUBLIC_API(bool)
 JS_DefinePropertyById(JSContext* cx, JS::HandleObject obj, JS::HandleId id, JS::HandleValue value,
-                      unsigned attrs, JSNative getter = nullptr, JSNative setter = nullptr);
+                      unsigned attrs);
+
+extern JS_PUBLIC_API(bool)
+JS_DefinePropertyById(JSContext* cx, JS::HandleObject obj, JS::HandleId id, JSNative getter,
+                      JSNative setter, unsigned attrs);
 
 extern JS_PUBLIC_API(bool)
 JS_DefinePropertyById(JSContext* cx, JS::HandleObject obj, JS::HandleId id, JS::HandleObject value,
-                      unsigned attrs, JSNative getter = nullptr, JSNative setter = nullptr);
+                      unsigned attrs);
 
 extern JS_PUBLIC_API(bool)
 JS_DefinePropertyById(JSContext* cx, JS::HandleObject obj, JS::HandleId id, JS::HandleString value,
-                      unsigned attrs, JSNative getter = nullptr, JSNative setter = nullptr);
+                      unsigned attrs);
 
 extern JS_PUBLIC_API(bool)
 JS_DefinePropertyById(JSContext* cx, JS::HandleObject obj, JS::HandleId id, int32_t value,
-                      unsigned attrs, JSNative getter = nullptr, JSNative setter = nullptr);
+                      unsigned attrs);
 
 extern JS_PUBLIC_API(bool)
 JS_DefinePropertyById(JSContext* cx, JS::HandleObject obj, JS::HandleId id, uint32_t value,
-                      unsigned attrs, JSNative getter = nullptr, JSNative setter = nullptr);
+                      unsigned attrs);
 
 extern JS_PUBLIC_API(bool)
 JS_DefinePropertyById(JSContext* cx, JS::HandleObject obj, JS::HandleId id, double value,
-                      unsigned attrs, JSNative getter = nullptr, JSNative setter = nullptr);
+                      unsigned attrs);
 
 extern JS_PUBLIC_API(bool)
 JS_DefineProperty(JSContext* cx, JS::HandleObject obj, const char* name, JS::HandleValue value,
-                  unsigned attrs, JSNative getter = nullptr, JSNative setter = nullptr);
+                  unsigned attrs);
+
+extern JS_PUBLIC_API(bool)
+JS_DefineProperty(JSContext* cx, JS::HandleObject obj, const char* name, JSNative getter,
+                  JSNative setter, unsigned attrs);
 
 extern JS_PUBLIC_API(bool)
 JS_DefineProperty(JSContext* cx, JS::HandleObject obj, const char* name, JS::HandleObject value,
-                  unsigned attrs, JSNative getter = nullptr, JSNative setter = nullptr);
+                  unsigned attrs);
 
 extern JS_PUBLIC_API(bool)
 JS_DefineProperty(JSContext* cx, JS::HandleObject obj, const char* name, JS::HandleString value,
-                  unsigned attrs, JSNative getter = nullptr, JSNative setter = nullptr);
+                  unsigned attrs);
 
 extern JS_PUBLIC_API(bool)
 JS_DefineProperty(JSContext* cx, JS::HandleObject obj, const char* name, int32_t value,
-                  unsigned attrs, JSNative getter = nullptr, JSNative setter = nullptr);
+                  unsigned attrs);
 
 extern JS_PUBLIC_API(bool)
 JS_DefineProperty(JSContext* cx, JS::HandleObject obj, const char* name, uint32_t value,
-                  unsigned attrs, JSNative getter = nullptr, JSNative setter = nullptr);
+                  unsigned attrs);
 
 extern JS_PUBLIC_API(bool)
 JS_DefineProperty(JSContext* cx, JS::HandleObject obj, const char* name, double value,
-                  unsigned attrs, JSNative getter = nullptr, JSNative setter = nullptr);
+                  unsigned attrs);
 
 extern JS_PUBLIC_API(bool)
 JS_DefineUCProperty(JSContext* cx, JS::HandleObject obj, const char16_t* name, size_t namelen,
@@ -3273,57 +3265,59 @@ JS_DefineUCProperty(JSContext* cx, JS::HandleObject obj, const char16_t* name, s
 
 extern JS_PUBLIC_API(bool)
 JS_DefineUCProperty(JSContext* cx, JS::HandleObject obj, const char16_t* name, size_t namelen,
-                    JS::HandleValue value, unsigned attrs,
-                    JSNative getter = nullptr, JSNative setter = nullptr);
+                    JS::HandleValue value, unsigned attrs);
 
 extern JS_PUBLIC_API(bool)
 JS_DefineUCProperty(JSContext* cx, JS::HandleObject obj, const char16_t* name, size_t namelen,
-                    JS::HandleObject value, unsigned attrs,
-                    JSNative getter = nullptr, JSNative setter = nullptr);
+                    JSNative getter, JSNative setter, unsigned attrs);
 
 extern JS_PUBLIC_API(bool)
 JS_DefineUCProperty(JSContext* cx, JS::HandleObject obj, const char16_t* name, size_t namelen,
-                    JS::HandleString value, unsigned attrs,
-                    JSNative getter = nullptr, JSNative setter = nullptr);
+                    JS::HandleObject value, unsigned attrs);
 
 extern JS_PUBLIC_API(bool)
 JS_DefineUCProperty(JSContext* cx, JS::HandleObject obj, const char16_t* name, size_t namelen,
-                    int32_t value, unsigned attrs,
-                    JSNative getter = nullptr, JSNative setter = nullptr);
+                    JS::HandleString value, unsigned attrs);
 
 extern JS_PUBLIC_API(bool)
 JS_DefineUCProperty(JSContext* cx, JS::HandleObject obj, const char16_t* name, size_t namelen,
-                    uint32_t value, unsigned attrs,
-                    JSNative getter = nullptr, JSNative setter = nullptr);
+                    int32_t value, unsigned attrs);
 
 extern JS_PUBLIC_API(bool)
 JS_DefineUCProperty(JSContext* cx, JS::HandleObject obj, const char16_t* name, size_t namelen,
-                    double value, unsigned attrs,
-                    JSNative getter = nullptr, JSNative setter = nullptr);
+                    uint32_t value, unsigned attrs);
+
+extern JS_PUBLIC_API(bool)
+JS_DefineUCProperty(JSContext* cx, JS::HandleObject obj, const char16_t* name, size_t namelen,
+                    double value, unsigned attrs);
 
 extern JS_PUBLIC_API(bool)
 JS_DefineElement(JSContext* cx, JS::HandleObject obj, uint32_t index, JS::HandleValue value,
-                 unsigned attrs, JSNative getter = nullptr, JSNative setter = nullptr);
+                 unsigned attrs);
+
+extern JS_PUBLIC_API(bool)
+JS_DefineElement(JSContext* cx, JS::HandleObject obj, uint32_t index, JSNative getter,
+                 JSNative setter, unsigned attrs);
 
 extern JS_PUBLIC_API(bool)
 JS_DefineElement(JSContext* cx, JS::HandleObject obj, uint32_t index, JS::HandleObject value,
-                 unsigned attrs, JSNative getter = nullptr, JSNative setter = nullptr);
+                 unsigned attrs);
 
 extern JS_PUBLIC_API(bool)
 JS_DefineElement(JSContext* cx, JS::HandleObject obj, uint32_t index, JS::HandleString value,
-                 unsigned attrs, JSNative getter = nullptr, JSNative setter = nullptr);
+                 unsigned attrs);
 
 extern JS_PUBLIC_API(bool)
 JS_DefineElement(JSContext* cx, JS::HandleObject obj, uint32_t index, int32_t value,
-                 unsigned attrs, JSNative getter = nullptr, JSNative setter = nullptr);
+                 unsigned attrs);
 
 extern JS_PUBLIC_API(bool)
 JS_DefineElement(JSContext* cx, JS::HandleObject obj, uint32_t index, uint32_t value,
-                 unsigned attrs, JSNative getter = nullptr, JSNative setter = nullptr);
+                 unsigned attrs);
 
 extern JS_PUBLIC_API(bool)
 JS_DefineElement(JSContext* cx, JS::HandleObject obj, uint32_t index, double value,
-                 unsigned attrs, JSNative getter = nullptr, JSNative setter = nullptr);
+                 unsigned attrs);
 
 /**
  * Compute the expression `id in obj`.
@@ -5144,11 +5138,11 @@ extern JS_PUBLIC_API(bool)
 JS_StringHasLatin1Chars(JSString* str);
 
 extern JS_PUBLIC_API(const JS::Latin1Char*)
-JS_GetLatin1StringCharsAndLength(JSContext* cx, const JS::AutoCheckCannotGC& nogc, JSString* str,
+JS_GetLatin1StringCharsAndLength(JSContext* cx, const JS::AutoRequireNoGC& nogc, JSString* str,
                                  size_t* length);
 
 extern JS_PUBLIC_API(const char16_t*)
-JS_GetTwoByteStringCharsAndLength(JSContext* cx, const JS::AutoCheckCannotGC& nogc, JSString* str,
+JS_GetTwoByteStringCharsAndLength(JSContext* cx, const JS::AutoRequireNoGC& nogc, JSString* str,
                                   size_t* length);
 
 extern JS_PUBLIC_API(bool)
@@ -5167,10 +5161,10 @@ extern JS_PUBLIC_API(JSFlatString*)
 JS_FlattenString(JSContext* cx, JSString* str);
 
 extern JS_PUBLIC_API(const JS::Latin1Char*)
-JS_GetLatin1FlatStringChars(const JS::AutoCheckCannotGC& nogc, JSFlatString* str);
+JS_GetLatin1FlatStringChars(const JS::AutoRequireNoGC& nogc, JSFlatString* str);
 
 extern JS_PUBLIC_API(const char16_t*)
-JS_GetTwoByteFlatStringChars(const JS::AutoCheckCannotGC& nogc, JSFlatString* str);
+JS_GetTwoByteFlatStringChars(const JS::AutoRequireNoGC& nogc, JSFlatString* str);
 
 static MOZ_ALWAYS_INLINE JSFlatString*
 JSID_TO_FLAT_STRING(jsid id)
@@ -6528,8 +6522,7 @@ SetBuildIdOp(JSContext* cx, BuildIdOp buildIdOp);
 /**
  * The WasmModule interface allows the embedding to hold a reference to the
  * underying C++ implementation of a JS WebAssembly.Module object for purposes
- * of efficient postMessage() of WebAssembly.Module and (de)serialization off
- * the object's JSRuntime's thread for IndexedDB.
+ * of efficient postMessage() and (de)serialization from a random thread.
  *
  * For postMessage() sharing:
  *
@@ -6550,8 +6543,10 @@ SetBuildIdOp(JSContext* cx, BuildIdOp buildIdOp);
  * compiled code are written into separate files: a bytecode file that always
  * allows successful deserialization and a compiled-code file keyed on cpu- and
  * build-id that may become invalid if either of these change between
- * serialization and deserialization. After serialization, a reference is
- * dropped from a separate thread so the virtual destructor must be thread-safe.
+ * serialization and deserialization. Due to tiering, the serialization must
+ * asynchronously wait for compilation to complete before requesting the
+ * module's compiled code. After serialization, a reference is dropped from a
+ * separate thread so the virtual destructor must be thread-safe.
  *
  * - Deserialization starts when the structured clone algorithm encounters a
  * serialized WebAssembly.Module. On a background thread, the compiled-code file
@@ -6559,10 +6554,25 @@ SetBuildIdOp(JSContext* cx, BuildIdOp buildIdOp);
  * still valid (as described above). DeserializeWasmModule is then called to
  * construct a JS::WasmModule (also on the background thread), passing the
  * bytecode file descriptor and, if valid, the compiled-code file descriptor.
- * The JS::WasmObject is then transported to the JSRuntime thread (which
- * originated the request) and the wrapping WebAssembly.Module object is created
- * by calling createObject().
+ * The JS::WasmObject is then transported to a JSContext thread and the wrapping
+ * WebAssembly.Module object is created by calling createObject().
  */
+
+class WasmModuleListener
+{
+  protected:
+    virtual ~WasmModuleListener() {}
+
+  public:
+    // These method signatures are chosen to exactly match nsISupports so that a
+    // plain nsISupports-implementing class can trivially implement this
+    // interface too. We can't simply #include "nsISupports.h" so we use MFBT
+    // equivalents for all the platform-dependent types.
+    virtual MozExternalRefCountType MOZ_XPCOM_ABI AddRef() = 0;
+    virtual MozExternalRefCountType MOZ_XPCOM_ABI Release() = 0;
+
+    virtual void onCompilationComplete() = 0;
+};
 
 struct WasmModule : js::AtomicRefCounted<WasmModule>
 {
@@ -6571,6 +6581,12 @@ struct WasmModule : js::AtomicRefCounted<WasmModule>
     virtual size_t bytecodeSerializedSize() const = 0;
     virtual void bytecodeSerialize(uint8_t* bytecodeBegin, size_t bytecodeSize) const = 0;
 
+    // Compilation must complete before the serialized code is requested. If
+    // compilation is not complete, the embedding must wait until notified by
+    // implementing WasmModuleListener. SpiderMonkey will hold a RefPtr to
+    // 'listener' until onCompilationComplete() is called.
+    virtual bool compilationComplete() const = 0;
+    virtual bool notifyWhenCompilationComplete(WasmModuleListener* listener) = 0;
     virtual size_t compiledSerializedSize() const = 0;
     virtual void compiledSerialize(uint8_t* compiledBegin, size_t compiledSize) const = 0;
 

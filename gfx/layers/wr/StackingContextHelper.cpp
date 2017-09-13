@@ -14,6 +14,9 @@ namespace layers {
 
 StackingContextHelper::StackingContextHelper()
   : mBuilder(nullptr)
+  , mHasPerspectiveTransform(false)
+  , mXScale(1.0f)
+  , mYScale(1.0f)
 {
   // mOrigin remains at 0,0
 }
@@ -24,6 +27,9 @@ StackingContextHelper::StackingContextHelper(const StackingContextHelper& aParen
                                              const Maybe<gfx::Matrix4x4>& aTransform,
                                              const nsTArray<wr::WrFilterOp>& aFilters)
   : mBuilder(&aBuilder)
+  , mHasPerspectiveTransform(false)
+  , mXScale(1.0f)
+  , mYScale(1.0f)
 {
   wr::LayoutRect scBounds = aParentSC.ToRelativeLayoutRect(aLayer->BoundsForStackingContext());
   Layer* layer = aLayer->GetLayer();
@@ -47,6 +53,9 @@ StackingContextHelper::StackingContextHelper(const StackingContextHelper& aParen
                                              gfx::Matrix4x4* aTransformPtr,
                                              const nsTArray<wr::WrFilterOp>& aFilters)
   : mBuilder(&aBuilder)
+  , mHasPerspectiveTransform(false)
+  , mXScale(1.0f)
+  , mYScale(1.0f)
 {
   wr::LayoutRect scBounds = aParentSC.ToRelativeLayoutRect(aLayer->BoundsForStackingContext());
   if (aTransformPtr) {
@@ -77,13 +86,44 @@ StackingContextHelper::StackingContextHelper(const StackingContextHelper& aParen
                                              const nsTArray<wr::WrFilterOp>& aFilters,
                                              const gfx::CompositionOp& aMixBlendMode)
   : mBuilder(&aBuilder)
+  , mHasPerspectiveTransform(false)
+  , mXScale(1.0f)
+  , mYScale(1.0f)
 {
   nsRect visibleRect;
+
+  if (aTransformPtr) {
+    mTransform = *aTransformPtr;
+  }
+
+  if (aPerspectivePtr) {
+    mHasPerspectiveTransform = true;
+  }
+
   bool is2d = !aTransformPtr || (aTransformPtr->Is2D() && !aPerspectivePtr);
   if (is2d) {
     nsRect itemBounds = aDisplayList->GetClippedBoundsWithRespectToASR(aDisplayListBuilder, aItem->GetActiveScrolledRoot());
     nsRect childrenVisible = aItem->GetVisibleRectForChildren();
     visibleRect = itemBounds.Intersect(childrenVisible);
+
+    // Apply the inherited scale from parent
+    mTransform.PostScale(aParentSC.mXScale, aParentSC.mYScale, 1.0);
+    mTransform.NudgeToIntegersFixedEpsilon();
+
+    // Calculate the correct scale for current stacking context
+    gfx::Size scale = mTransform.As2D().ScaleFactors(true);
+
+    // Restore the scale to default if the scale is too small
+    if (FuzzyEqualsAdditive(scale.width, 0.0f) ||
+        FuzzyEqualsAdditive(scale.height, 0.0f)) {
+      scale = gfx::Size(1.0f, 1.0f);
+    }
+
+    mTransform.PreScale(1.0f/scale.width, 1.0f/scale.height, 1.0);
+
+    // Store the inherited scale for child
+    this->mXScale = scale.width;
+    this->mYScale = scale.height;
   } else {
     visibleRect = aDisplayList->GetBounds(aDisplayListBuilder);
     // The position of bounds are calculated by transform and perspective matrix in 3d case. reset it to (0, 0)
@@ -99,14 +139,11 @@ StackingContextHelper::StackingContextHelper(const StackingContextHelper& aParen
   }
 
   wr::LayoutRect scBounds = aParentSC.ToRelativeLayoutRect(bounds);
-  if (aTransformPtr) {
-    mTransform = *aTransformPtr;
-  }
 
   mBuilder->PushStackingContext(scBounds,
                                 aAnimationsId,
                                 aOpacityPtr,
-                                aTransformPtr,
+                                aTransformPtr ? &mTransform : aTransformPtr,
                                 is2d ? wr::TransformStyle::Flat : wr::TransformStyle::Preserve3D,
                                 aPerspectivePtr,
                                 wr::ToMixBlendMode(aMixBlendMode),
@@ -125,25 +162,32 @@ StackingContextHelper::~StackingContextHelper()
 wr::LayoutRect
 StackingContextHelper::ToRelativeLayoutRect(const LayerRect& aRect) const
 {
-  return wr::ToLayoutRect(aRect - mOrigin);
+  // Multiply by the scale inherited from ancestors if exits
+  LayerRect aMaybeScaledRect = aRect;
+  if (mXScale != 1.0f || mYScale != 1.0f) {
+    aMaybeScaledRect.Scale(mXScale, mYScale);
+  }
+
+  return wr::ToLayoutRect(RoundedToInt(aMaybeScaledRect - mOrigin));
 }
 
 wr::LayoutRect
 StackingContextHelper::ToRelativeLayoutRect(const LayoutDeviceRect& aRect) const
 {
-  return wr::ToLayoutRect(ViewAs<LayerPixel>(aRect, PixelCastJustification::WebRenderHasUnitResolution) - mOrigin);
+  // Multiply by the scale inherited from ancestors if exits
+  LayoutDeviceRect aMaybeScaledRect = aRect;
+  if (mXScale != 1.0f || mYScale != 1.0f) {
+    aMaybeScaledRect.Scale(mXScale, mYScale);
+  }
+
+  return wr::ToLayoutRect(RoundedToInt(ViewAs<LayerPixel>(aMaybeScaledRect,
+                                                          PixelCastJustification::WebRenderHasUnitResolution) - mOrigin));
 }
 
 wr::LayoutPoint
 StackingContextHelper::ToRelativeLayoutPoint(const LayerPoint& aPoint) const
 {
   return wr::ToLayoutPoint(aPoint - mOrigin);
-}
-
-wr::LayoutRect
-StackingContextHelper::ToRelativeLayoutRectRounded(const LayoutDeviceRect& aRect) const
-{
-  return wr::ToLayoutRect(RoundedToInt(ViewAs<LayerPixel>(aRect, PixelCastJustification::WebRenderHasUnitResolution) - mOrigin));
 }
 
 } // namespace layers

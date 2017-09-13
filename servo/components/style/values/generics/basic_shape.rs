@@ -6,9 +6,8 @@
 //! types that are generic over their `ToCss` implementations.
 
 use std::fmt;
-use style_traits::{HasViewportPercentage, ToCss};
+use style_traits::ToCss;
 use values::animated::{Animate, Procedure, ToAnimatedZero};
-use values::computed::ComputedValueAsSpecified;
 use values::distance::{ComputeSquaredDistance, SquaredDistance};
 use values::generics::border::BorderRadius;
 use values::generics::position::Position;
@@ -20,14 +19,13 @@ pub type ClippingShape<BasicShape, Url> = ShapeSource<BasicShape, GeometryBox, U
 /// https://drafts.fxtf.org/css-masking-1/#typedef-geometry-box
 #[allow(missing_docs)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-#[derive(Clone, Copy, Debug, PartialEq, ToCss)]
+#[derive(Clone, Copy, Debug, PartialEq, ToComputedValue, ToCss)]
 pub enum GeometryBox {
     FillBox,
     StrokeBox,
     ViewBox,
     ShapeBox(ShapeBox),
 }
-impl ComputedValueAsSpecified for GeometryBox {}
 
 /// A float area shape, for `shape-outside`.
 pub type FloatAreaShape<BasicShape, Url> = ShapeSource<BasicShape, ShapeBox, Url>;
@@ -44,11 +42,18 @@ add_impls_for_keyword_enum!(ShapeBox);
 /// A shape source, for some reference box.
 #[allow(missing_docs)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-#[derive(Clone, Debug, PartialEq, ToComputedValue, ToCss)]
+#[derive(Animate, Clone, Debug, PartialEq, ToComputedValue, ToCss)]
 pub enum ShapeSource<BasicShape, ReferenceBox, Url> {
+    #[animation(error)]
     Url(Url),
-    Shape(BasicShape, Option<ReferenceBox>),
+    Shape(
+        BasicShape,
+        #[animation(constant)]
+        Option<ReferenceBox>,
+    ),
+    #[animation(error)]
     Box(ReferenceBox),
+    #[animation(error)]
     None,
 }
 
@@ -94,10 +99,13 @@ pub struct Ellipse<H, V, LengthOrPercentage> {
 /// https://drafts.csswg.org/css-shapes/#typedef-shape-radius
 #[allow(missing_docs)]
 #[cfg_attr(feature = "servo", derive(HeapSizeOf))]
-#[derive(Clone, ComputeSquaredDistance, Copy, Debug, PartialEq, ToComputedValue, ToCss)]
+#[derive(Animate, Clone, ComputeSquaredDistance, Copy, Debug, PartialEq)]
+#[derive(ToComputedValue, ToCss)]
 pub enum ShapeRadius<LengthOrPercentage> {
     Length(LengthOrPercentage),
+    #[animation(error)]
     ClosestSide,
+    #[animation(error)]
     FarthestSide,
 }
 
@@ -122,29 +130,6 @@ define_css_keyword_enum!(FillRule:
     "evenodd" => EvenOdd
 );
 add_impls_for_keyword_enum!(FillRule);
-
-// FIXME(nox): This should be derivable, but we need to implement Animate
-// on the T types.
-impl<B, T, U> Animate for ShapeSource<B, T, U>
-where
-    B: Animate,
-    T: Clone + PartialEq,
-{
-    fn animate(&self, other: &Self, procedure: Procedure) -> Result<Self, ()> {
-        match (self, other) {
-            (
-                &ShapeSource::Shape(ref this, ref this_box),
-                &ShapeSource::Shape(ref other, ref other_box),
-            ) if this_box == other_box => {
-                Ok(ShapeSource::Shape(
-                    this.animate(other, procedure)?,
-                    this_box.clone(),
-                ))
-            },
-            _ => Err(()),
-        }
-    }
-}
 
 // FIXME(nox): Implement ComputeSquaredDistance for T types and stop
 // using PartialEq here, this will let us derive this impl.
@@ -172,11 +157,6 @@ impl<B, T, U> ToAnimatedZero for ShapeSource<B, T, U> {
     }
 }
 
-impl<B, T, U> HasViewportPercentage for ShapeSource<B, T, U> {
-    #[inline]
-    fn has_viewport_percentage(&self) -> bool { false }
-}
-
 impl<L> ToCss for InsetRect<L>
     where L: ToCss + PartialEq
 {
@@ -188,20 +168,6 @@ impl<L> ToCss for InsetRect<L>
             radius.to_css(dest)?;
         }
         dest.write_str(")")
-    }
-}
-
-impl<L> Animate for ShapeRadius<L>
-where
-    L: Animate,
-{
-    fn animate(&self, other: &Self, procedure: Procedure) -> Result<Self, ()> {
-        match (self, other) {
-            (&ShapeRadius::Length(ref this), &ShapeRadius::Length(ref other)) => {
-                Ok(ShapeRadius::Length(this.animate(other, procedure)?))
-            },
-            _ => Err(()),
-        }
     }
 }
 

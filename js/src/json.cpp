@@ -755,7 +755,7 @@ js::Stringify(JSContext* cx, MutableHandleValue vp, JSObject* replacer_, const V
 
     /* Steps 10-11. */
     RootedId emptyId(cx, NameToId(cx->names().empty));
-    if (!NativeDefineProperty(cx, wrapper, emptyId, vp, nullptr, nullptr, JSPROP_ENUMERATE))
+    if (!NativeDefineDataProperty(cx, wrapper, emptyId, vp, JSPROP_ENUMERATE))
         return false;
 
     /* Step 12. */
@@ -872,7 +872,7 @@ Revive(JSContext* cx, HandleValue reviver, MutableHandleValue vp)
     if (!obj)
         return false;
 
-    if (!DefineProperty(cx, obj, cx->names().empty, vp))
+    if (!DefineDataProperty(cx, obj, cx->names().empty, vp))
         return false;
 
     Rooted<jsid> id(cx, NameToId(cx->names().empty));
@@ -992,11 +992,8 @@ js::InitJSONClass(JSContext* cx, HandleObject obj)
     if (!JSON)
         return nullptr;
 
-    if (!JS_DefineProperty(cx, global, js_JSON_str, JSON, JSPROP_RESOLVING,
-                           JS_STUBGETTER, JS_STUBSETTER))
-    {
+    if (!JS_DefineProperty(cx, global, js_JSON_str, JSON, JSPROP_RESOLVING))
         return nullptr;
-    }
 
     if (!JS_DefineFunctions(cx, JSON, json_static_methods))
         return nullptr;

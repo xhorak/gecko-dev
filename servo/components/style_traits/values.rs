@@ -6,6 +6,7 @@
 
 use app_units::Au;
 use cssparser::{BasicParseError, ParseError, Parser, Token, UnicodeRange, serialize_string};
+use cssparser::ToCss as CssparserToCss;
 use std::fmt::{self, Write};
 
 /// Serialises a value according to its CSS representation.
@@ -18,8 +19,12 @@ use std::fmt::{self, Write};
 ///   of their name;
 /// * unit variants whose name starts with "Moz" or "Webkit" are prepended
 ///   with a "-";
-/// * variants with fields get serialised as the space-separated serialisations
-///   of their fields.
+/// * if `#[css(comma)]` is found on a variant, its fields are separated by
+///   commas, otherwise, by spaces;
+/// * if `#[css(function)]` is found on a variant, the variant name gets
+///   serialised like unit variants and its fields are surrounded by parentheses;
+/// * finally, one can put `#[css(derive_debug)]` on the whole type, to
+///   implement `Debug` by a single call to `ToCss::to_css`.
 pub trait ToCss {
     /// Serialize `self` in CSS syntax, writing to `dest`.
     fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: Write;
@@ -62,6 +67,24 @@ where
     #[inline]
     fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: Write {
         self.as_ref().map_or(Ok(()), |value| value.to_css(dest))
+    }
+}
+
+#[macro_export]
+macro_rules! serialize_function {
+    ($dest: expr, $name: ident($( $arg: expr, )+)) => {
+        serialize_function!($dest, $name($($arg),+))
+    };
+    ($dest: expr, $name: ident($first_arg: expr $( , $arg: expr )*)) => {
+        {
+            $dest.write_str(concat!(stringify!($name), "("))?;
+            $first_arg.to_css($dest)?;
+            $(
+                $dest.write_str(", ")?;
+                $arg.to_css($dest)?;
+            )*
+            $dest.write_char(')')
+        }
     }
 }
 
@@ -322,7 +345,8 @@ impl<T> ToCss for Box<T> where T: ?Sized + ToCss {
 
 impl ToCss for Au {
     fn to_css<W>(&self, dest: &mut W) -> fmt::Result where W: Write {
-        write!(dest, "{}px", self.to_f64_px())
+        self.to_f64_px().to_css(dest)?;
+        dest.write_str("px")
     }
 }
 
@@ -525,16 +549,5 @@ pub mod specified {
                 _ => val,
             }
         }
-    }
-}
-
-
-/// Wrap CSS types for serialization with `write!` or `format!` macros.
-/// Used by ToCss of SpecifiedOperation.
-pub struct Css<T>(pub T);
-
-impl<T: ToCss> fmt::Display for Css<T> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.0.to_css(f)
     }
 }

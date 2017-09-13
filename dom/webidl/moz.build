@@ -298,6 +298,9 @@ with Files("SourceBuffer*"):
 with Files("StereoPannerNode.webidl"):
     BUG_COMPONENT = ("Core", "Web Audio")
 
+with Files("StreamFilter*"):
+    BUG_COMPONENT = ("Toolkit", "WebExtensions: Request Handling")
+
 with Files("Style*"):
     BUG_COMPONENT = ("Core", "DOM: CSS Object Model")
 
@@ -378,6 +381,8 @@ PREPROCESSED_WEBIDL_FILES = [
 ]
 
 WEBIDL_FILES = [
+    'AbortController.webidl',
+    'AbortSignal.webidl',
     'AbstractWorker.webidl',
     'AddonManager.webidl',
     'AnalyserNode.webidl',
@@ -427,6 +432,7 @@ WEBIDL_FILES = [
     'CDATASection.webidl',
     'ChannelMergerNode.webidl',
     'ChannelSplitterNode.webidl',
+    'ChannelWrapper.webidl',
     'CharacterData.webidl',
     'CheckerboardReportService.webidl',
     'ChildNode.webidl',
@@ -515,10 +521,8 @@ WEBIDL_FILES = [
     'ExtendableMessageEvent.webidl',
     'FakePluginTagInit.webidl',
     'Fetch.webidl',
-    'FetchController.webidl',
     'FetchEvent.webidl',
     'FetchObserver.webidl',
-    'FetchSignal.webidl',
     'File.webidl',
     'FileList.webidl',
     'FileMode.webidl',
@@ -795,6 +799,8 @@ WEBIDL_FILES = [
     'StorageEvent.webidl',
     'StorageManager.webidl',
     'StorageType.webidl',
+    'StreamFilter.webidl',
+    'StreamFilterDataEvent.webidl',
     'StructuredCloneHolder.webidl',
     'StyleSheet.webidl',
     'StyleSheetList.webidl',

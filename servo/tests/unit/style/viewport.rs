@@ -11,7 +11,7 @@ use servo_config::prefs::{PREFS, PrefValue};
 use servo_url::ServoUrl;
 use style::context::QuirksMode;
 use style::media_queries::{Device, MediaList, MediaType};
-use style::parser::{Parse, ParserContext, ParserErrorContext};
+use style::parser::{ParserContext, ParserErrorContext};
 use style::shared_lock::SharedRwLock;
 use style::stylesheets::{CssRuleType, Stylesheet, StylesheetInDocument, Origin};
 use style::stylesheets::viewport_rule::*;
@@ -35,7 +35,7 @@ macro_rules! stylesheet {
             None,
             &$error_reporter,
             QuirksMode::NoQuirks,
-            0u64
+            0
         ))
     }
 }

@@ -61,6 +61,7 @@
 #include "nsRect.h"
 #include "Units.h"
 #include "nsIDeprecationWarner.h"
+#include "nsILoadURIDelegate.h"
 
 namespace mozilla {
 class Encoding;
@@ -912,6 +913,8 @@ protected:
 
   eCharsetReloadState mCharsetReloadState;
 
+  nsCOMPtr<nsILoadURIDelegate> mLoadURIDelegate;
+
   // Offset in the parent's child list.
   // -1 if the docshell is added dynamically to the parent shell.
   int32_t mChildOffset;
@@ -927,7 +930,8 @@ protected:
   int32_t mItemType;
 
   // Index into the SHTransaction list, indicating the previous and current
-  // transaction at the time that this DocShell begins to load
+  // transaction at the time that this DocShell begins to load. Consequently
+  // root docshell's indices can differ from child docshells'.
   int32_t mPreviousTransIndex;
   int32_t mLoadedTransIndex;
 

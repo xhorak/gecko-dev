@@ -78,21 +78,17 @@ import android.util.Base64;
 import android.util.Log;
 import android.util.SparseBooleanArray;
 import android.util.SparseIntArray;
-import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
 import android.view.MotionEvent;
 import android.view.OrientationEventListener;
-import android.view.SurfaceView;
 import android.view.View;
-import android.view.ViewGroup;
 import android.view.ViewTreeObserver;
 import android.view.Window;
 import android.widget.AdapterView;
 import android.widget.Button;
-import android.widget.FrameLayout;
 import android.widget.ListView;
 import android.widget.RelativeLayout;
 import android.widget.SimpleAdapter;
@@ -157,6 +153,9 @@ public abstract class GeckoApp extends GeckoActivity
     public static final String PREFS_CRASHED_COUNT         = "crashedCount";
     public static final String PREFS_CLEANUP_TEMP_FILES    = "cleanupTempFiles";
 
+    // Used with SharedPreferences, per profile, to determine if this is the first run of
+    // the application. When accessing SharedPreferences, the default value of true should be used.
+    //
     // Originally, this was only used for the telemetry core ping logic. To avoid
     // having to write custom migration logic, we just keep the original pref key.
     public static final String PREFS_IS_FIRST_RUN = "telemetry-isFirstRun";
@@ -752,12 +751,6 @@ public abstract class GeckoApp extends GeckoActivity
             // Context: Sharing via chrome list (no explicit session is active)
             Telemetry.sendUIEvent(TelemetryContract.Event.SHARE, TelemetryContract.Method.LIST, "text");
 
-        } else if ("Snackbar:Show".equals(event)) {
-            SnackbarBuilder.builder(this)
-                    .fromEvent(message)
-                    .callback(callback)
-                    .buildAndShow();
-
         } else if ("SystemUI:Visibility".equals(event)) {
             if (message.getBoolean("visible", true)) {
                 mMainLayout.setSystemUiVisibility(View.SYSTEM_UI_FLAG_VISIBLE);
@@ -919,6 +912,7 @@ public abstract class GeckoApp extends GeckoActivity
     private void setImageAs(final String aSrc) {
         Permissions
                 .from(this)
+                .onBackgroundThread()
                 .withPermissions(Manifest.permission.WRITE_EXTERNAL_STORAGE)
                 .andFallback(new Runnable() {
                     @Override
@@ -942,6 +936,9 @@ public abstract class GeckoApp extends GeckoActivity
      * @param aSrc The URI to download the image from.
      */
     private void downloadImageForSetImage(final String aSrc) {
+        // Network access from the main thread can cause a StrictMode crash on release builds.
+        ThreadUtils.assertOnBackgroundThread();
+
         boolean isDataURI = aSrc.startsWith("data:");
         Bitmap image = null;
         InputStream is = null;
@@ -1403,8 +1400,6 @@ public abstract class GeckoApp extends GeckoActivity
                 BrowserLocaleManager.storeAndNotifyOSLocale(getSharedPreferencesForProfile(), osLocale);
             }
         });
-
-        IntentHelper.init(this);
     }
 
     @Override
@@ -2046,8 +2041,6 @@ public abstract class GeckoApp extends GeckoActivity
         // Undo whatever we did in onPause.
         super.onResume();
 
-        EventDispatcher.getInstance().registerUiThreadListener(this, "Snackbar:Show");
-
         if (mIsAbortingAppLaunch) {
             return;
         }
@@ -2119,8 +2112,6 @@ public abstract class GeckoApp extends GeckoActivity
     @Override
     public void onPause()
     {
-        EventDispatcher.getInstance().unregisterUiThreadListener(this, "Snackbar:Show");
-
         if (mIsAbortingAppLaunch) {
             super.onPause();
             return;

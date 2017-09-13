@@ -165,13 +165,11 @@ ImageDocument::~ImageDocument()
 NS_IMPL_CYCLE_COLLECTION_INHERITED(ImageDocument, MediaDocument,
                                    mImageContent)
 
-NS_IMPL_ADDREF_INHERITED(ImageDocument, MediaDocument)
-NS_IMPL_RELEASE_INHERITED(ImageDocument, MediaDocument)
-
-NS_INTERFACE_TABLE_HEAD_CYCLE_COLLECTION_INHERITED(ImageDocument)
-  NS_INTERFACE_TABLE_INHERITED(ImageDocument, nsIImageDocument,
-                               imgINotificationObserver, nsIDOMEventListener)
-NS_INTERFACE_TABLE_TAIL_INHERITING(MediaDocument)
+NS_IMPL_ISUPPORTS_CYCLE_COLLECTION_INHERITED(ImageDocument,
+                                             MediaDocument,
+                                             nsIImageDocument,
+                                             imgINotificationObserver,
+                                             nsIDOMEventListener)
 
 
 nsresult
@@ -279,9 +277,9 @@ ImageDocument::SetScriptGlobalObject(nsIScriptGlobalObject* aScriptGlobalObject)
     target->AddEventListener(NS_LITERAL_STRING("keypress"), this, false);
 
     if (GetReadyStateEnum() != nsIDocument::READYSTATE_COMPLETE) {
-      LinkStylesheet(NS_LITERAL_STRING("resource://gre/res/ImageDocument.css"));
+      LinkStylesheet(NS_LITERAL_STRING("resource://content-accessible/ImageDocument.css"));
       if (!nsContentUtils::IsChildOfSameType(this)) {
-        LinkStylesheet(NS_LITERAL_STRING("resource://gre/res/TopLevelImageDocument.css"));
+        LinkStylesheet(NS_LITERAL_STRING("resource://content-accessible/TopLevelImageDocument.css"));
         LinkStylesheet(NS_LITERAL_STRING("chrome://global/skin/media/TopLevelImageDocument.css"));
       }
     }

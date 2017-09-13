@@ -10,7 +10,6 @@
 #include "MediaShutdownManager.h"
 #include "MediaSource.h"
 #include "MediaSourceDemuxer.h"
-#include "MediaSourceResource.h"
 #include "MediaSourceUtils.h"
 #include "SourceBufferList.h"
 #include "VideoUtils.h"
@@ -33,12 +32,6 @@ MediaSourceDecoder::MediaSourceDecoder(MediaDecoderInit& aInit)
   mExplicitDuration.emplace(UnspecifiedNaN<double>());
 }
 
-MediaResource*
-MediaSourceDecoder::GetResource() const
-{
-  return mResource;
-}
-
 MediaDecoderStateMachine*
 MediaSourceDecoder::CreateStateMachine()
 {
@@ -49,6 +42,7 @@ MediaSourceDecoder::CreateStateMachine()
   init.mKnowsCompositor = GetCompositor();
   init.mCrashHelper = GetOwner()->CreateGMPCrashHelper();
   init.mFrameStats = mFrameStats;
+  init.mMediaDecoderOwnerID = mOwner;
   mReader = new MediaFormatReader(init, mDemuxer);
   return new MediaDecoderStateMachine(this, mReader);
 }
@@ -60,7 +54,7 @@ MediaSourceDecoder::Load(nsIPrincipal* aPrincipal)
   MOZ_ASSERT(!GetStateMachine());
   AbstractThread::AutoEnter context(AbstractMainThread());
 
-  mResource = new MediaSourceResource(aPrincipal);
+  mPrincipal = aPrincipal;
 
   nsresult rv = MediaShutdownManager::Instance().Register(this);
   if (NS_WARN_IF(NS_FAILED(rv))) {
@@ -203,7 +197,6 @@ MediaSourceDecoder::Ended(bool aEnded)
 {
   MOZ_ASSERT(NS_IsMainThread());
   AbstractThread::AutoEnter context(AbstractMainThread());
-  mResource->SetEnded(aEnded);
   if (aEnded) {
     // We want the MediaSourceReader to refresh its buffered range as it may
     // have been modified (end lined up).
@@ -262,6 +255,7 @@ MediaSourceDecoder::SetMediaSourceDuration(double aDuration)
 void
 MediaSourceDecoder::GetMozDebugReaderData(nsACString& aString)
 {
+  aString += NS_LITERAL_CSTRING("Container Type: MediaSource\n");
   if (mReader && mDemuxer) {
     mReader->GetMozDebugReaderData(aString);
     mDemuxer->GetMozDebugReaderData(aString);
@@ -282,8 +276,8 @@ MediaSourceDecoder::NextFrameBufferedStatus()
   MOZ_ASSERT(NS_IsMainThread());
   AbstractThread::AutoEnter context(AbstractMainThread());
 
-  if (!mMediaSource
-      || mMediaSource->ReadyState() == dom::MediaSourceReadyState::Closed) {
+  if (!mMediaSource ||
+      mMediaSource->ReadyState() == dom::MediaSourceReadyState::Closed) {
     return MediaDecoderOwner::NEXT_FRAME_UNAVAILABLE;
   }
 
@@ -360,6 +354,13 @@ MediaSourceDecoder::NotifyInitDataArrived()
   if (mDemuxer) {
     mDemuxer->NotifyInitDataArrived();
   }
+}
+
+already_AddRefed<nsIPrincipal>
+MediaSourceDecoder::GetCurrentPrincipal()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  return do_AddRef(mPrincipal);
 }
 
 #undef MSE_DEBUG

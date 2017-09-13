@@ -515,8 +515,10 @@ ContentEventHandler::GetFocusedContent()
   }
   nsCOMPtr<nsPIDOMWindowOuter> window = doc->GetWindow();
   nsCOMPtr<nsPIDOMWindowOuter> focusedWindow;
-  return nsFocusManager::GetFocusedDescendant(window, true,
-                                              getter_AddRefs(focusedWindow));
+  return nsFocusManager::GetFocusedDescendant(
+                           window,
+                           nsFocusManager::eIncludeAllDescendants,
+                           getter_AddRefs(focusedWindow));
 }
 
 bool
@@ -3232,7 +3234,7 @@ ContentEventHandler::OnSelectionEvent(WidgetSelectionEvent* aEvent)
   mSelection->StartBatchChanges();
 
   // Clear selection first before setting
-  rv = mSelection->RemoveAllRanges();
+  rv = mSelection->RemoveAllRangesTemporarily();
   // Need to call EndBatchChanges at the end even if call failed
   if (NS_SUCCEEDED(rv)) {
     if (aEvent->mReversed) {
@@ -3252,7 +3254,7 @@ ContentEventHandler::OnSelectionEvent(WidgetSelectionEvent* aEvent)
 
   // Pass the eSetSelection events reason along with the BatchChange-end
   // selection change notifications.
-  mSelection->EndBatchChangesInternal(aEvent->mReason);
+  mSelection->EndBatchChanges(aEvent->mReason);
   NS_ENSURE_SUCCESS(rv, rv);
 
   mSelection->ScrollIntoViewInternal(

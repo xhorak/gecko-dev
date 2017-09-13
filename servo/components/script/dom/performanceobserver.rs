@@ -9,7 +9,6 @@ use dom::bindings::codegen::Bindings::PerformanceObserverBinding;
 use dom::bindings::codegen::Bindings::PerformanceObserverBinding::PerformanceObserverCallback;
 use dom::bindings::codegen::Bindings::PerformanceObserverBinding::PerformanceObserverInit;
 use dom::bindings::codegen::Bindings::PerformanceObserverBinding::PerformanceObserverMethods;
-use dom::bindings::codegen::Bindings::WindowBinding::WindowBinding::WindowMethods;
 use dom::bindings::error::{Error, Fallible};
 use dom::bindings::js::Root;
 use dom::bindings::reflector::{DomObject, Reflector, reflect_dom_object};
@@ -23,8 +22,8 @@ use std::rc::Rc;
 
 /// List of allowed performance entry types.
 const VALID_ENTRY_TYPES: &'static [&'static str] = &[
-    // "mark", XXX User Timing API
-    // "measure", XXX User Timing API
+    "mark", // User Timing API
+    "measure", // User Timing API
     // "resource", XXX Resource Timing API
     // "server", XXX Server Timing API
     "paint", // Paint Timing API
@@ -51,8 +50,8 @@ impl PerformanceObserver {
 
     #[allow(unrooted_must_root)]
     pub fn new(global: &GlobalScope,
-           callback: Rc<PerformanceObserverCallback>,
-           entries: DOMPerformanceEntryList)
+               callback: Rc<PerformanceObserverCallback>,
+               entries: DOMPerformanceEntryList)
         -> Root<PerformanceObserver> {
         let observer = PerformanceObserver::new_inherited(callback, DOMRefCell::new(entries));
         reflect_dom_object(box observer, global, PerformanceObserverBinding::Wrap)
@@ -89,29 +88,36 @@ impl PerformanceObserver {
     pub fn entries(&self) -> DOMPerformanceEntryList {
         self.entries.borrow().clone()
     }
+
+    pub fn set_entries(&self, entries: DOMPerformanceEntryList) {
+        *self.entries.borrow_mut() = entries;
+    }
 }
 
 impl PerformanceObserverMethods for PerformanceObserver {
     // https://w3c.github.io/performance-timeline/#dom-performanceobserver-observe()
     fn Observe(&self, options: &PerformanceObserverInit) -> Fallible<()> {
+        // step 1
         // Make sure the client is asking to observe events from allowed entry types.
         let entry_types = options.entryTypes.iter()
                                             .filter(|e| VALID_ENTRY_TYPES.contains(&e.as_ref()))
                                             .map(|e| e.clone())
                                             .collect::<Vec<DOMString>>();
+        // step 2
         // There must be at least one valid entry type.
         if entry_types.is_empty() {
             return Err((Error::Type("entryTypes cannot be empty".to_string())));
         }
 
-        let performance = self.global().as_window().Performance();
-        performance.add_observer(self, entry_types);
+        // step 3-4-5
+        self.global().performance().add_observer(self, entry_types, options.buffered);
+
         Ok(())
     }
 
     // https://w3c.github.io/performance-timeline/#dom-performanceobserver-disconnect()
     fn Disconnect(&self) {
-        self.global().as_window().Performance().remove_observer(self);
+        self.global().performance().remove_observer(self);
         self.entries.borrow_mut().clear();
     }
 }

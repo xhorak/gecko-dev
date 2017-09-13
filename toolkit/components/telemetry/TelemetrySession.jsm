@@ -863,22 +863,13 @@ var Impl = {
   },
 
   getHistograms: function getHistograms(subsession, clearSubsession) {
-    let registered =
-      Telemetry.registeredHistograms(this.getDatasetType(), []);
-    if (this._testing == false) {
-      // Omit telemetry test histograms outside of tests.
-      registered = registered.filter(n => !n.startsWith("TELEMETRY_TEST_"));
-    }
-    registered = registered.concat(registered.map(n => "STARTUP_" + n));
-
-    let hls = subsession ? Telemetry.snapshotSubsessionHistograms(clearSubsession)
-                         : Telemetry.histogramSnapshots;
+    let hls = Telemetry.snapshotHistograms(this.getDatasetType(), subsession, clearSubsession);
     let ret = {};
 
     for (let [process, histograms] of Object.entries(hls)) {
       ret[process] = {};
       for (let [name, value] of Object.entries(histograms)) {
-        if (registered.includes(name)) {
+        if (this._testing || !name.startsWith("TELEMETRY_TEST_")) {
           ret[process][name] = this.packHistogram(value);
         }
       }
@@ -888,21 +879,13 @@ var Impl = {
   },
 
   getKeyedHistograms(subsession, clearSubsession) {
-    let registered =
-      Telemetry.registeredKeyedHistograms(this.getDatasetType(), []);
-    if (this._testing == false) {
-      // Omit telemetry test histograms outside of tests.
-      registered = registered.filter(id => !id.startsWith("TELEMETRY_TEST_"));
-    }
-
-    let khs = subsession ? Telemetry.snapshotSubsessionKeyedHistograms(clearSubsession)
-                         : Telemetry.keyedHistogramSnapshots;
+    let khs = Telemetry.snapshotKeyedHistograms(this.getDatasetType(), subsession, clearSubsession);
     let ret = {};
 
     for (let [process, histograms] of Object.entries(khs)) {
       ret[process] = {};
       for (let [name, value] of Object.entries(histograms)) {
-        if (registered.includes(name)) {
+        if (this._testing || !name.startsWith("TELEMETRY_TEST_")) {
           let keys = Object.keys(value);
           if (keys.length == 0) {
             // Skip empty keyed histogram
@@ -1558,7 +1541,8 @@ var Impl = {
       if (Telemetry.canRecordExtended) {
         GCTelemetry.init();
       }
-    }, testing ? TELEMETRY_TEST_DELAY : TELEMETRY_DELAY);
+    }, testing ? TELEMETRY_TEST_DELAY : TELEMETRY_DELAY,
+    testing ? 0 : undefined);
 
     delayedTask.arm();
   },
@@ -1716,7 +1700,24 @@ var Impl = {
       };
       p.push(TelemetryController.submitExternalPing(getPingType(shutdownPayload), shutdownPayload, options)
                                 .catch(e => this._log.error("saveShutdownPings - failed to submit shutdown ping", e)));
-     }
+
+      // Send a duplicate of first-shutdown pings as a new ping type, in order to properly
+      // evaluate first session profiles (see bug 1390095).
+      const sendFirstShutdownPing =
+        Services.prefs.getBoolPref(Utils.Preferences.ShutdownPingSender, false) &&
+        Services.prefs.getBoolPref(Utils.Preferences.FirstShutdownPingEnabled, false) &&
+        TelemetryReportingPolicy.isFirstRun();
+
+      if (sendFirstShutdownPing) {
+        let options = {
+            addClientId: true,
+            addEnvironment: true,
+            usePingSender: true,
+          };
+        p.push(TelemetryController.submitExternalPing("first-shutdown", shutdownPayload, options)
+                                  .catch(e => this._log.error("saveShutdownPings - failed to submit first shutdown ping", e)));
+      }
+    }
 
     // As a temporary measure, we want to submit saved-session too if extended Telemetry is enabled
     // to keep existing performance analysis working.

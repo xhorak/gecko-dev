@@ -786,6 +786,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(Selection)
   // we don't want to notify the listeners during JS GC (they could be
   // in JS!).
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mSelectionListeners)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mCachedRange)
   tmp->RemoveAllRanges();
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mFrameSelection)
   NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER
@@ -798,6 +799,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(Selection)
     }
   }
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mAnchorFocusRange)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mCachedRange)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mFrameSelection)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mSelectionListeners)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
@@ -919,6 +921,19 @@ Selection::FocusOffset()
   }
 
   return mAnchorFocusRange->StartOffset();
+}
+
+nsIContent*
+Selection::GetChildAtAnchorOffset()
+{
+  if (!mAnchorFocusRange)
+    return nullptr;
+
+  if (GetDirection() == eDirNext) {
+    return mAnchorFocusRange->GetChildAtStartOffset();
+  }
+
+  return mAnchorFocusRange->GetChildAtEndOffset();
 }
 
 static nsresult
@@ -2290,6 +2305,32 @@ Selection::RemoveAllRanges(ErrorResult& aRv)
   }
 }
 
+nsresult
+Selection::RemoveAllRangesTemporarily()
+{
+  if (!mCachedRange) {
+    // Look for a range which isn't referred by other than this instance.
+    // If there is, it'll be released by calling Clear().  So, we can reuse it
+    // when we need to create a range.
+    for (auto& rangeData : mRanges) {
+      auto& range = rangeData.mRange;
+      if (range->GetRefCount() == 1 ||
+          (range->GetRefCount() == 2 && range == mAnchorFocusRange)) {
+        mCachedRange = range;
+        break;
+      }
+    }
+  }
+
+  // Then, remove all ranges.
+  ErrorResult result;
+  RemoveAllRanges(result);
+  if (result.Failed()) {
+    mCachedRange = nullptr;
+  }
+  return result.StealNSResult();
+}
+
 /** AddRange adds the specified range to the selection
  *  @param aRange is the range to be added
  */
@@ -2331,6 +2372,10 @@ Selection::AddRangeInternal(nsRange& aRange, nsIDocument* aDocument,
     // associated with context object. Otherwise, this method must do nothing."
     return;
   }
+
+  // If a range is being added, we don't need cached range because Collapse()
+  // won't use it.
+  mCachedRange = nullptr;
 
   // AddTableCellRange might flush frame.
   RefPtr<Selection> kungFuDeathGrip(this);
@@ -2588,7 +2633,9 @@ Selection::Collapse(nsINode& aContainer, uint32_t aOffset, ErrorResult& aRv)
   // If the old range isn't referred by anybody other than this method,
   // we should reuse it for reducing the recreation cost.
   if (oldRange && oldRange->GetRefCount() == 1) {
-    range = oldRange;
+    range = Move(oldRange);
+  } else if (mCachedRange) {
+    range = Move(mCachedRange);
   } else {
     range = new nsRange(container);
   }
@@ -3785,7 +3832,9 @@ Selection::NotifySelectionListeners()
       nsFocusManager* fm = nsFocusManager::GetFocusManager();
       nsCOMPtr<nsPIDOMWindowOuter> focusedWindow;
       nsIContent* focusedContent =
-        fm->GetFocusedDescendant(window, false, getter_AddRefs(focusedWindow));
+        nsFocusManager::GetFocusedDescendant(window,
+                                             nsFocusManager::eOnlyCurrentWindow,
+                                             getter_AddRefs(focusedWindow));
       nsCOMPtr<Element> focusedElement = do_QueryInterface(focusedContent);
       // When all selected ranges are in an editing host, it should take focus.
       // But otherwise, we shouldn't move focus since Chromium doesn't move
@@ -3832,32 +3881,22 @@ Selection::NotifySelectionListeners()
   return NS_OK;
 }
 
-NS_IMETHODIMP
+void
 Selection::StartBatchChanges()
 {
   if (mFrameSelection) {
     RefPtr<nsFrameSelection> frameSelection = mFrameSelection;
     frameSelection->StartBatchChanges();
   }
-  return NS_OK;
 }
 
-
-
-NS_IMETHODIMP
-Selection::EndBatchChanges()
-{
-  return EndBatchChangesInternal();
-}
-
-nsresult
-Selection::EndBatchChangesInternal(int16_t aReason)
+void
+Selection::EndBatchChanges(int16_t aReason)
 {
   if (mFrameSelection) {
     RefPtr<nsFrameSelection> frameSelection = mFrameSelection;
     frameSelection->EndBatchChanges(aReason);
   }
-  return NS_OK;
 }
 
 void
@@ -4061,18 +4100,28 @@ Selection::SetBaseAndExtent(nsINode& aAnchorNode, uint32_t aAnchorOffset,
     endOffset = aAnchorOffset;
   }
 
-  RefPtr<nsRange> newRange;
-  nsresult rv = nsRange::CreateRange(start, startOffset, end, endOffset,
-                                     getter_AddRefs(newRange));
-  // CreateRange returns IndexSizeError if any offset is out of bounds.
+  // If there is cached range, we should reuse it for saving the allocation
+  // const (and some other cost in nsRange::DoSetRange().
+  RefPtr<nsRange> newRange = Move(mCachedRange);
+
+  nsresult rv = NS_OK;
+  if (newRange) {
+    rv = newRange->SetStartAndEnd(start, startOffset, end, endOffset);
+  } else {
+    rv = nsRange::CreateRange(start, startOffset, end, endOffset,
+                              getter_AddRefs(newRange));
+  }
+
+  // nsRange::SetStartAndEnd() and nsRange::CreateRange() returns
+  // IndexSizeError if any offset is out of bounds.
   if (NS_FAILED(rv)) {
     aRv.Throw(rv);
     return;
   }
 
-  rv = RemoveAllRanges();
-  if (NS_FAILED(rv)) {
-    aRv.Throw(rv);
+  // Use non-virtual method instead of nsISelection::RemoveAllRanges().
+  RemoveAllRanges(aRv);
+  if (aRv.Failed()) {
     return;
   }
 

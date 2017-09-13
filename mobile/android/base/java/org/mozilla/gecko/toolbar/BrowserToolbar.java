@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
 
+import android.graphics.Rect;
 import android.support.annotation.Nullable;
 import android.support.v4.content.ContextCompat;
 import org.mozilla.gecko.BrowserApp;
@@ -32,9 +33,11 @@ import org.mozilla.gecko.toolbar.ToolbarDisplayLayout.OnStopListener;
 import org.mozilla.gecko.toolbar.ToolbarDisplayLayout.OnTitleChangeListener;
 import org.mozilla.gecko.toolbar.ToolbarDisplayLayout.UpdateFlags;
 import org.mozilla.gecko.util.Clipboard;
+import org.mozilla.gecko.util.HardwareUtils;
 import org.mozilla.gecko.util.MenuUtils;
 import org.mozilla.gecko.util.WindowUtil;
 import org.mozilla.gecko.widget.AnimatedProgressBar;
+import org.mozilla.gecko.widget.TouchDelegateWithReset;
 import org.mozilla.gecko.widget.themed.ThemedImageButton;
 import org.mozilla.gecko.widget.themed.ThemedRelativeLayout;
 
@@ -55,6 +58,7 @@ import android.view.View;
 import android.view.ViewTreeObserver.OnGlobalLayoutListener;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
+import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.PopupWindow;
 import android.support.annotation.NonNull;
@@ -81,7 +85,9 @@ public abstract class BrowserToolbar extends ThemedRelativeLayout
                                                 GeckoMenu.ActionItemBarPresenter {
     private static final String LOGTAG = "GeckoToolbar";
 
-    private static final int LIGHTWEIGHT_THEME_ALPHA = 77;
+    private static final int LIGHTWEIGHT_THEME_INVERT_ALPHA_START = 204; // 255 - alpha = invert_alpha
+    private static final int LIGHTWEIGHT_THEME_INVERT_ALPHA_END = 102;
+    public static final int LIGHTWEIGHT_THEME_INVERT_ALPHA_TABLET = 51;
 
     public interface OnActivateListener {
         public void onActivate();
@@ -113,6 +119,7 @@ public abstract class BrowserToolbar extends ThemedRelativeLayout
     }
 
     protected final ToolbarDisplayLayout urlDisplayLayout;
+    protected final HorizontalScrollView urlDisplayScroll;
     protected final ToolbarEditLayout urlEditLayout;
     protected final View urlBarEntry;
     protected boolean isSwitchingTabs;
@@ -183,6 +190,7 @@ public abstract class BrowserToolbar extends ThemedRelativeLayout
         isSwitchingTabs = true;
 
         urlDisplayLayout = (ToolbarDisplayLayout) findViewById(R.id.display_layout);
+        urlDisplayScroll = (HorizontalScrollView) findViewById(R.id.url_bar_title_scroll_view);
         urlBarEntry = findViewById(R.id.url_bar_entry);
         urlEditLayout = (ToolbarEditLayout) findViewById(R.id.edit_layout);
 
@@ -210,7 +218,27 @@ public abstract class BrowserToolbar extends ThemedRelativeLayout
         urlDisplayLayout.setToolbarPrefs(prefs);
         urlEditLayout.setToolbarPrefs(prefs);
 
-        setOnCreateContextMenuListener(new View.OnCreateContextMenuListener() {
+        // ScrollViews are allowed to have only one child.
+        final View scrollChild = urlDisplayScroll.getChildAt(0);
+
+        urlDisplayScroll.addOnLayoutChangeListener(new OnLayoutChangeListener() {
+            @Override
+            public void onLayoutChange(View v, int left, int top, int right, int bottom, int oldLeft, int oldTop, int oldRight, int oldBottom) {
+                final int width = urlDisplayScroll.getWidth();
+                final int height = urlDisplayScroll.getHeight();
+                final int oldWidth = oldRight - oldLeft;
+                final int oldHeight = oldBottom - oldTop;
+
+                if (width != oldWidth || height != oldHeight) {
+                    final Rect r = new Rect();
+                    r.right = width;
+                    r.bottom = height;
+                    urlDisplayScroll.setTouchDelegate(new TouchDelegateWithReset(r, scrollChild));
+                }
+            }
+        });
+
+        scrollChild.setOnCreateContextMenuListener(new View.OnCreateContextMenuListener() {
             @Override
             public void onCreateContextMenu(ContextMenu menu, View v, ContextMenu.ContextMenuInfo menuInfo) {
                 // Do not show the context menu while editing
@@ -253,7 +281,7 @@ public abstract class BrowserToolbar extends ThemedRelativeLayout
             }
         });
 
-        setOnClickListener(new OnClickListener() {
+        scrollChild.setOnClickListener(new OnClickListener() {
             @Override
             public void onClick(View v) {
                 if (activateListener != null) {
@@ -908,7 +936,7 @@ public abstract class BrowserToolbar extends ThemedRelativeLayout
         }
 
         final StateListDrawable stateList = new StateListDrawable();
-        stateList.addState(PRIVATE_STATE_SET, getColorDrawable(R.color.tabs_tray_grey_pressed));
+        stateList.addState(PRIVATE_STATE_SET, getColorDrawable(R.color.photon_browser_toolbar_bg_private));
         stateList.addState(EMPTY_STATE_SET, drawable);
 
         setBackgroundDrawable(stateList);
@@ -937,7 +965,19 @@ public abstract class BrowserToolbar extends ThemedRelativeLayout
 
         final LightweightThemeDrawable drawable = theme.getColorDrawable(view, color);
         if (drawable != null) {
-            drawable.setAlpha(LIGHTWEIGHT_THEME_ALPHA, LIGHTWEIGHT_THEME_ALPHA);
+            final int startAlpha, endAlpha;
+            final boolean horizontalGradient;
+
+            if (HardwareUtils.isTablet()) {
+                startAlpha = LIGHTWEIGHT_THEME_INVERT_ALPHA_TABLET;
+                endAlpha = LIGHTWEIGHT_THEME_INVERT_ALPHA_TABLET;
+                horizontalGradient = false;
+            } else {
+                startAlpha = LIGHTWEIGHT_THEME_INVERT_ALPHA_START;
+                endAlpha = LIGHTWEIGHT_THEME_INVERT_ALPHA_END;
+                horizontalGradient = true;
+            }
+            drawable.setAlpha(startAlpha, endAlpha, horizontalGradient);
         }
 
         return drawable;

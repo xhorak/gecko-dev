@@ -159,6 +159,12 @@ class DesktopUnittest(TestingMixin, MercurialScript, BlobUploadMixin, MozbaseMix
             "default": False,
             "help": "Run tests with Stylo enabled"}
          ],
+        [["--disable-stylo"], {
+            "action": "store_true",
+            "dest": "disable_stylo",
+            "default": False,
+            "help": "Run tests with Stylo disabled"}
+         ],
         [["--enable-webrender"], {
             "action": "store_true",
             "dest": "enable_webrender",
@@ -227,6 +233,8 @@ class DesktopUnittest(TestingMixin, MercurialScript, BlobUploadMixin, MozbaseMix
 
         if c['enable_stylo']:
             perfherder_options.append('stylo')
+        if c['disable_stylo']:
+            perfherder_options.append('stylo_disabled')
 
         self.resource_monitor_perfherder_id = ('.'.join(perfherder_parts),
                                                perfherder_options)
@@ -481,8 +489,7 @@ class DesktopUnittest(TestingMixin, MercurialScript, BlobUploadMixin, MozbaseMix
             "mochitest": [("plain.*", "mochitest"),
                           ("browser-chrome.*", "browser-chrome"),
                           ("mochitest-devtools-chrome.*", "devtools-chrome"),
-                          ("chrome", "chrome"),
-                          ("jetpack.*", "jetpack")],
+                          ("chrome", "chrome")],
             "xpcshell": [("xpcshell", "xpcshell")],
             "reftest": [("reftest", "reftest"),
                         ("crashtest", "crashtest")]
@@ -662,6 +669,7 @@ class DesktopUnittest(TestingMixin, MercurialScript, BlobUploadMixin, MozbaseMix
         abs_res_dir = self.query_abs_res_dir()
 
         max_verify_time = timedelta(minutes=60)
+        verify_time_exceeded = False
         start_time = datetime.now()
 
         if suites:
@@ -728,12 +736,21 @@ class DesktopUnittest(TestingMixin, MercurialScript, BlobUploadMixin, MozbaseMix
                     env['MOZ_WEBRENDER'] = '1'
                     env['MOZ_ACCELERATED'] = '1'
 
+                if self.config['disable_stylo']:
+                    if self.config['single_stylo_traversal']:
+                        self.fatal("--disable-stylo conflicts with --single-stylo-traversal")
+                    if self.config['enable_stylo']:
+                        self.fatal("--disable-stylo conflicts with --enable-stylo")
+
                 if self.config['single_stylo_traversal']:
                     env['STYLO_THREADS'] = '1'
                 else:
                     env['STYLO_THREADS'] = '4'
+
                 if self.config['enable_stylo']:
                     env['STYLO_FORCE_ENABLED'] = '1'
+                if self.config['disable_stylo']:
+                    env['STYLO_FORCE_DISABLED'] = '1'
 
                 env = self.query_env(partial_env=env, log_level=INFO)
                 cmd_timeout = self.get_timeout_for_category(suite_category)
@@ -744,6 +761,8 @@ class DesktopUnittest(TestingMixin, MercurialScript, BlobUploadMixin, MozbaseMix
                         # tests so that a task timeout is not triggered, and so that
                         # (partial) results are made available in a timely manner.
                         self.info("TinderboxPrint: Verification too long: Not all tests were verified.<br/>")
+                        # Signal verify time exceeded, to break out of suites loop also.
+                        verify_time_exceeded = True
                         break
                     final_cmd = copy.copy(cmd)
                     final_cmd.extend(verify_args)
@@ -778,6 +797,10 @@ class DesktopUnittest(TestingMixin, MercurialScript, BlobUploadMixin, MozbaseMix
                     else:
                         self.log("The %s suite: %s ran with return status: %s" %
                                  (suite_category, suite, tbpl_status), level=log_level)
+
+                if verify_time_exceeded:
+                    # Verification ran out of time, detected in inner loop.
+                    break
         else:
             self.debug('There were no suites to run for %s' % suite_category)
 

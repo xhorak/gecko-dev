@@ -1143,6 +1143,7 @@ impl LayoutThread {
         let document_shared_lock = document.style_shared_lock();
         self.document_shared_lock = Some(document_shared_lock.clone());
         let author_guard = document_shared_lock.read();
+        let had_used_viewport_units = self.stylist.device().used_viewport_units();
         let device = Device::new(MediaType::screen(), initial_viewport, device_pixel_ratio);
         let sheet_origins_affected_by_device_change =
             self.stylist.set_device(device, &author_guard);
@@ -1165,28 +1166,9 @@ impl LayoutThread {
                        .send(ConstellationMsg::ViewportConstrained(self.id, constraints.clone()))
                        .unwrap();
             }
-            if self.stylist.iter_stylesheets().any(|sheet| sheet.0.dirty_on_viewport_size_change()) {
-                let mut iter = element.as_node().traverse_preorder();
-
-                let mut next = iter.next();
-                while let Some(node) = next {
-                    if node.needs_dirty_on_viewport_size_changed() {
-                        let el = node.as_element().unwrap();
-                        if let Some(mut d) = element.mutate_data() {
-                            if d.has_styles() {
-                                // FIXME(emilio): This only needs to recascade,
-                                // afaict.
-                                d.restyle.hint.insert(RestyleHint::restyle_subtree());
-                            }
-                        }
-                        if let Some(p) = el.parent_element() {
-                            unsafe { p.note_dirty_descendant() };
-                        }
-
-                        next = iter.next_skipping_children();
-                    } else {
-                        next = iter.next();
-                    }
+            if had_used_viewport_units {
+                if let Some(mut data) = element.mutate_data() {
+                    data.hint.insert(RestyleHint::recascade_subtree());
                 }
             }
         }
@@ -1268,9 +1250,9 @@ impl LayoutThread {
             let mut style_data = style_data.borrow_mut();
 
             // Stash the data on the element for processing by the style system.
-            style_data.restyle.hint.insert(restyle.hint.into());
-            style_data.restyle.damage = restyle.damage;
-            debug!("Noting restyle for {:?}: {:?}", el, style_data.restyle);
+            style_data.hint.insert(restyle.hint.into());
+            style_data.damage = restyle.damage;
+            debug!("Noting restyle for {:?}: {:?}", el, style_data);
         }
 
         // Create a layout context for use throughout the following passes.

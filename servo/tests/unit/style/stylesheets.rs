@@ -70,7 +70,7 @@ fn test_parse_stylesheet() {
     let lock = SharedRwLock::new();
     let media = Arc::new(lock.wrap(MediaList::empty()));
     let stylesheet = Stylesheet::from_str(css, url.clone(), Origin::UserAgent, media, lock,
-                                          None, &CSSErrorReporterTest, QuirksMode::NoQuirks, 0u64);
+                                          None, &CSSErrorReporterTest, QuirksMode::NoQuirks, 0);
     let mut namespaces = Namespaces::default();
     namespaces.default = Some((ns!(html), ()));
     let expected = Stylesheet {
@@ -78,7 +78,6 @@ fn test_parse_stylesheet() {
             origin: Origin::UserAgent,
             namespaces: RwLock::new(namespaces),
             url_data: RwLock::new(url),
-            dirty_on_viewport_size_change: AtomicBool::new(false),
             quirks_mode: QuirksMode::NoQuirks,
             rules: CssRules::new(vec![
                 CssRule::Namespace(Arc::new(stylesheet.shared_lock.wrap(NamespaceRule {
@@ -218,7 +217,11 @@ fn test_parse_stylesheet() {
                                 (PropertyDeclaration::Width(
                                     LengthOrPercentageOrAuto::Percentage(Percentage(0.))),
                                  Importance::Normal),
-                            ])))
+                            ]))),
+                            source_location: SourceLocation {
+                                line: 17,
+                                column: 13,
+                            },
                         })),
                         Arc::new(stylesheet.shared_lock.wrap(Keyframe {
                             selector: KeyframeSelector::new_for_unit_testing(
@@ -232,6 +235,10 @@ fn test_parse_stylesheet() {
                                         vec![TimingFunction::ease()])),
                                  Importance::Normal),
                             ]))),
+                            source_location: SourceLocation {
+                                line: 18,
+                                column: 13,
+                            },
                         })),
                     ],
                     vendor_prefix: None,
@@ -281,7 +288,7 @@ impl ParseErrorReporter for CSSInvalidErrorReporterTest {
                 url: url.clone(),
                 line: location.line,
                 column: location.column,
-                message: error.to_string()
+                message: error.to_string(),
             }
         );
     }
@@ -305,7 +312,7 @@ fn test_report_error_stylesheet() {
     let lock = SharedRwLock::new();
     let media = Arc::new(lock.wrap(MediaList::empty()));
     Stylesheet::from_str(css, url.clone(), Origin::UserAgent, media, lock,
-                         None, &error_reporter, QuirksMode::NoQuirks, 5u64);
+                         None, &error_reporter, QuirksMode::NoQuirks, 5);
 
     let mut errors = errors.lock().unwrap();
 
@@ -313,13 +320,13 @@ fn test_report_error_stylesheet() {
     assert_eq!("Unsupported property declaration: 'invalid: true;', \
                 Custom(PropertyDeclaration(UnknownProperty(\"invalid\")))", error.message);
     assert_eq!(9, error.line);
-    assert_eq!(8, error.column);
+    assert_eq!(9, error.column);
 
     let error = errors.pop().unwrap();
     assert_eq!("Unsupported property declaration: 'display: invalid;', \
                 Custom(PropertyDeclaration(InvalidValue(\"display\", None)))", error.message);
     assert_eq!(8, error.line);
-    assert_eq!(8, error.column);
+    assert_eq!(9, error.column);
 
     // testing for the url
     assert_eq!(url, error.url);
@@ -342,7 +349,7 @@ fn test_no_report_unrecognized_vendor_properties() {
     let lock = SharedRwLock::new();
     let media = Arc::new(lock.wrap(MediaList::empty()));
     Stylesheet::from_str(css, url, Origin::UserAgent, media, lock,
-                         None, &error_reporter, QuirksMode::NoQuirks, 0u64);
+                         None, &error_reporter, QuirksMode::NoQuirks, 0);
 
     let mut errors = errors.lock().unwrap();
     let error = errors.pop().unwrap();
@@ -365,7 +372,7 @@ fn test_source_map_url() {
         let media = Arc::new(lock.wrap(MediaList::empty()));
         let stylesheet = Stylesheet::from_str(test.0, url.clone(), Origin::UserAgent, media, lock,
                                               None, &CSSErrorReporterTest, QuirksMode::NoQuirks,
-                                              0u64);
+                                              0);
         let url_opt = stylesheet.contents.source_map_url.read();
         assert_eq!(*url_opt, test.1);
     }

@@ -36,6 +36,7 @@ class ChannelMediaDecoder : public MediaDecoder
 
   private:
     /* MediaResourceCallback functions */
+    AbstractThread* AbstractMainThread() const override;
     MediaDecoderOwner* GetMediaOwner() const override;
     void NotifyNetworkError() override;
     void NotifyDataArrived() override;
@@ -78,18 +79,20 @@ public:
                 bool aIsPrivateBrowsing,
                 nsIStreamListener** aStreamListener);
 
+  void AddSizeOfResources(ResourceSizes* aSizes) override;
+  already_AddRefed<nsIPrincipal> GetCurrentPrincipal() override;
   bool IsTransportSeekable() override;
   void SetLoadInBackground(bool aLoadInBackground) override;
   void Suspend() override;
   void Resume() override;
 
 private:
-  MediaResource* GetResource() const override final;
+  void PinForSeek() override;
+  void UnpinForSeek() override;
 
   // Create a new state machine to run this decoder.
   MediaDecoderStateMachine* CreateStateMachine();
 
-  nsresult OpenResource(nsIStreamListener** aStreamListener);
   nsresult Load(BaseMediaResource* aOriginal);
 
   // Called by MediaResource when the download has ended.
@@ -140,6 +143,10 @@ private:
 
   // True if mPlaybackBytesPerSecond is a reliable estimate.
   bool mPlaybackRateReliable = true;
+
+  // True when our media stream has been pinned. We pin the stream
+  // while seeking.
+  bool mPinnedForSeek = false;
 };
 
 } // namespace mozilla

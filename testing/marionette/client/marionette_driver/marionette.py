@@ -554,7 +554,7 @@ class Marionette(object):
     CONTEXT_CHROME = "chrome"  # non-browser content: windows, dialogs, etc.
     CONTEXT_CONTENT = "content"  # browser content: iframes, divs, etc.
     DEFAULT_STARTUP_TIMEOUT = 120
-    DEFAULT_SHUTDOWN_TIMEOUT = 65  # Firefox will kill hanging threads after 60s
+    DEFAULT_SHUTDOWN_TIMEOUT = 120  # Firefox will kill hanging threads after 60s
 
     # Bug 1336953 - Until we can remove the socket timeout parameter it has to be
     # set a default value which is larger than the longest timeout as defined by the
@@ -563,7 +563,7 @@ class Marionette(object):
     DEFAULT_SOCKET_TIMEOUT = 360
 
     def __init__(self, host="localhost", port=2828, app=None, bin=None,
-                 baseurl=None, socket_timeout=DEFAULT_SOCKET_TIMEOUT,
+                 baseurl=None, socket_timeout=None,
                  startup_timeout=None, **instance_args):
         """Construct a holder for the Marionette connection.
 
@@ -600,10 +600,18 @@ class Marionette(object):
         self.chrome_window = None
         self.baseurl = baseurl
         self._test_name = None
-        self.socket_timeout = socket_timeout
         self.crashed = 0
 
-        self.startup_timeout = int(startup_timeout or self.DEFAULT_STARTUP_TIMEOUT)
+        if socket_timeout is None:
+            self.socket_timeout = self.DEFAULT_SOCKET_TIMEOUT
+        else:
+            self.socket_timeout = float(socket_timeout)
+
+        if startup_timeout is None:
+            self.startup_timeout = self.DEFAULT_STARTUP_TIMEOUT
+        else:
+            self.startup_timeout = int(startup_timeout)
+
         if self.bin:
             if not Marionette.is_port_available(self.port, host=self.host):
                 ex_msg = "{0}:{1} is unavailable.".format(self.host, self.port)

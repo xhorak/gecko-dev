@@ -43,6 +43,15 @@ public:
     , mPendingWrapperRestyles(aPendingWrapperRestyles)
     , mPendingWrapperRestyleOffset(aPendingWrapperRestyles.Length())
     , mChangesHandled(nsChangeHint(0))
+#ifdef DEBUG
+    // If !mOwner, then we wouldn't have processed our wrapper restyles, because
+    // we only process those when handling an element with a frame.  But that's
+    // OK, because if we started our traversal at an element with no frame
+    // (e.g. it's display:contents), that means the wrapper frames in our list
+    // actually inherit from one of its ancestors, not from it, and hence not
+    // restyling them is OK.
+    , mAssertWrapperRestyleLength(false)
+#endif // DEBUG
   {}
 
   // We shouldn't assume that changes handled from our parent are handled for
@@ -159,9 +168,11 @@ private:
   // Whether we should assert in our destructor that we've processed all of the
   // relevant wrapper restyles.
 #ifdef DEBUG
-  const bool mAssertWrapperRestyleLength = true;
+  const bool mAssertWrapperRestyleLength;
 #endif // DEBUG
 };
+
+enum class ServoPostTraversalFlags : uint32_t;
 
 /**
  * Restyle manager for a Servo-backed style system.
@@ -186,6 +197,7 @@ public:
                                     nsRestyleHint aRestyleHint);
   void ProcessPendingRestyles();
   void ProcessAllPendingAttributeAndStateInvalidations();
+  bool HasPendingRestyleAncestor(dom::Element* aElement) const;
 
   /**
    * Performs a Servo animation-only traversal to compute style for all nodes
@@ -219,6 +231,17 @@ public:
   // this method accordingly (e.g. to ReparentStyleContextForFirstLine).
   nsresult ReparentStyleContext(nsIFrame* aFrame);
 
+private:
+  /**
+   * Reparent the descendants of aFrame.  This is used by ReparentStyleContext
+   * and shouldn't be called by anyone else.  aProviderChild, if non-null, is a
+   * child that was the style parent for aFrame and hence shouldn't be
+   * reparented.
+   */
+  void ReparentFrameDescendants(nsIFrame* aFrame, nsIFrame* aProviderChild,
+                                ServoStyleSet& aStyleSet);
+
+public:
   /**
    * Clears the ServoElementData and HasDirtyDescendants from all elements
    * in the subtree rooted at aElement.
@@ -262,14 +285,13 @@ private:
   bool ProcessPostTraversal(Element* aElement,
                             ServoStyleContext* aParentContext,
                             ServoRestyleState& aRestyleState,
-                            ServoTraversalFlags aFlags,
-                            bool aParentWasRestyled);
+                            ServoPostTraversalFlags aFlags);
 
   struct TextPostTraversalState;
   bool ProcessPostTraversalForText(nsIContent* aTextNode,
                                    TextPostTraversalState& aState,
                                    ServoRestyleState& aRestyleState,
-                                   bool aParentWasRestyled);
+                                   ServoPostTraversalFlags aFlags);
 
   inline ServoStyleSet* StyleSet() const
   {

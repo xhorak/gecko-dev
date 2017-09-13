@@ -3,8 +3,9 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use border::{BorderCornerInstance, BorderCornerSide};
-use device::TextureId;
+use device::Texture;
 use gpu_cache::{GpuCache, GpuCacheAddress, GpuCacheHandle, GpuCacheUpdateList};
+use gpu_types::BoxShadowCacheInstance;
 use internal_types::BatchTextures;
 use internal_types::{FastHashMap, SourceTexture};
 use mask_cache::MaskCacheInfo;
@@ -21,7 +22,7 @@ use std::{f32, i32, usize};
 use texture_allocator::GuillotineAllocator;
 use util::{TransformedRect, TransformedRectKind};
 use api::{BuiltDisplayList, ClipAndScrollInfo, ClipId, ColorF, DeviceIntPoint, ImageKey};
-use api::{DeviceIntRect, DeviceIntSize, DeviceUintPoint, DeviceUintSize, FontInstance};
+use api::{DeviceIntRect, DeviceIntSize, DeviceUintPoint, DeviceUintSize};
 use api::{ExternalImageType, FilterOp, FontRenderMode, ImageRendering, LayerRect};
 use api::{LayerToWorldTransform, MixBlendMode, PipelineId, PropertyBinding, TransformStyle};
 use api::{TileOffset, WorldToLayerTransform, YuvColorSpace, YuvFormat, LayerVector2D};
@@ -43,7 +44,7 @@ impl AlphaBatchHelpers for PrimitiveStore {
         match metadata.prim_kind {
             PrimitiveKind::TextRun => {
                 let text_run_cpu = &self.cpu_text_runs[metadata.cpu_prim_index.0];
-                match text_run_cpu.normal_render_mode {
+                match text_run_cpu.font.render_mode {
                     FontRenderMode::Subpixel => BlendMode::Subpixel(text_run_cpu.color),
                     FontRenderMode::Alpha | FontRenderMode::Mono => BlendMode::Alpha,
                 }
@@ -101,39 +102,20 @@ struct DynamicTaskInfo {
     rect: DeviceIntRect,
 }
 
-pub struct BatchList {
-    pub alpha_batches: Vec<PrimitiveBatch>,
-    pub opaque_batches: Vec<PrimitiveBatch>,
+pub struct AlphaBatchList {
+    pub batches: Vec<AlphaPrimitiveBatch>,
 }
 
-impl BatchList {
-    fn new() -> BatchList {
-        BatchList {
-            alpha_batches: Vec::new(),
-            opaque_batches: Vec::new(),
+impl AlphaBatchList {
+    fn new() -> AlphaBatchList {
+        AlphaBatchList {
+            batches: Vec::new(),
         }
-    }
-
-    fn with_suitable_batch<F>(&mut self,
-                              key: &AlphaBatchKey,
-                              item_bounding_rect: &DeviceIntRect,
-                              f: F) where F: Fn(&mut PrimitiveBatch) {
-        let batch = self.get_suitable_batch(key, item_bounding_rect);
-        f(batch)
     }
 
     fn get_suitable_batch(&mut self,
                           key: &AlphaBatchKey,
-                          item_bounding_rect: &DeviceIntRect) -> &mut PrimitiveBatch {
-        let (batches, check_intersections) = match key.blend_mode {
-            BlendMode::None => {
-                (&mut self.opaque_batches, false)
-            }
-            BlendMode::Alpha | BlendMode::PremultipliedAlpha | BlendMode::Subpixel(..) => {
-                (&mut self.alpha_batches, true)
-            }
-        };
-
+                          item_bounding_rect: &DeviceIntRect) -> &mut Vec<PrimitiveInstance> {
         let mut selected_batch_index = None;
 
         // Composites always get added to their own batch.
@@ -143,21 +125,20 @@ impl BatchList {
         match key.kind {
             AlphaBatchKind::Composite { .. } => {}
             _ => {
-                'outer: for (batch_index, batch) in batches.iter()
-                                                           .enumerate()
-                                                           .rev()
-                                                           .take(10) {
+                'outer: for (batch_index, batch) in self.batches
+                                                        .iter()
+                                                        .enumerate()
+                                                        .rev()
+                                                        .take(10) {
                     if batch.key.is_compatible_with(key) {
                         selected_batch_index = Some(batch_index);
                         break;
                     }
 
                     // check for intersections
-                    if check_intersections {
-                        for item_rect in &batch.item_rects {
-                            if item_rect.intersects(item_bounding_rect) {
-                                break 'outer;
-                            }
+                    for item_rect in &batch.item_rects {
+                        if item_rect.intersects(item_bounding_rect) {
+                            break 'outer;
                         }
                     }
                 }
@@ -165,15 +146,53 @@ impl BatchList {
         }
 
         if selected_batch_index.is_none() {
-            let new_batch = PrimitiveBatch::new(key.clone());
-            selected_batch_index = Some(batches.len());
-            batches.push(new_batch);
+            let new_batch = AlphaPrimitiveBatch::new(key.clone());
+            selected_batch_index = Some(self.batches.len());
+            self.batches.push(new_batch);
         }
 
-        let batch = &mut batches[selected_batch_index.unwrap()];
+        let batch = &mut self.batches[selected_batch_index.unwrap()];
         batch.item_rects.push(*item_bounding_rect);
 
-        batch
+        &mut batch.instances
+    }
+}
+
+pub struct OpaqueBatchList {
+    pub batches: Vec<OpaquePrimitiveBatch>,
+}
+
+impl OpaqueBatchList {
+    fn new() -> OpaqueBatchList {
+        OpaqueBatchList {
+            batches: Vec::new(),
+        }
+    }
+
+    fn get_suitable_batch(&mut self,
+                          key: &AlphaBatchKey) -> &mut Vec<PrimitiveInstance> {
+        let mut selected_batch_index = None;
+
+        for (batch_index, batch) in self.batches
+                                        .iter()
+                                        .enumerate()
+                                        .rev()
+                                        .take(10) {
+            if batch.key.is_compatible_with(key) {
+                selected_batch_index = Some(batch_index);
+                break;
+            }
+        }
+
+        if selected_batch_index.is_none() {
+            let new_batch = OpaquePrimitiveBatch::new(key.clone());
+            selected_batch_index = Some(self.batches.len());
+            self.batches.push(new_batch);
+        }
+
+        let batch = &mut self.batches[selected_batch_index.unwrap()];
+
+        &mut batch.instances
     }
 
     fn finalize(&mut self) {
@@ -183,9 +202,40 @@ impl BatchList {
         // TODO(gw): Maybe we can change the batch code to
         //           build these in reverse and avoid having
         //           to reverse the instance array here.
-        for batch in &mut self.opaque_batches {
+        for batch in &mut self.batches {
             batch.instances.reverse();
         }
+    }
+}
+
+pub struct BatchList {
+    pub alpha_batch_list: AlphaBatchList,
+    pub opaque_batch_list: OpaqueBatchList,
+}
+
+impl BatchList {
+    fn new() -> BatchList {
+        BatchList {
+            alpha_batch_list: AlphaBatchList::new(),
+            opaque_batch_list: OpaqueBatchList::new(),
+        }
+    }
+
+    fn get_suitable_batch(&mut self,
+                          key: &AlphaBatchKey,
+                          item_bounding_rect: &DeviceIntRect) -> &mut Vec<PrimitiveInstance> {
+        match key.blend_mode {
+            BlendMode::None => {
+                self.opaque_batch_list.get_suitable_batch(key)
+            }
+            BlendMode::Alpha | BlendMode::PremultipliedAlpha | BlendMode::Subpixel(..) => {
+                self.alpha_batch_list.get_suitable_batch(key, item_bounding_rect)
+            }
+        }
+    }
+
+    fn finalize(&mut self) {
+        self.opaque_batch_list.finalize()
     }
 }
 
@@ -237,7 +287,7 @@ impl AlphaRenderItem {
                                                                amount,
                                                                z);
 
-                batch.add_instance(PrimitiveInstance::from(instance));
+                batch.push(PrimitiveInstance::from(instance));
             }
             AlphaRenderItem::HardwareComposite(stacking_context_index, src_id, composite_op, z) => {
                 let stacking_context = &ctx.stacking_context_store[stacking_context_index.0];
@@ -255,7 +305,7 @@ impl AlphaRenderItem {
                                                                0,
                                                                z);
 
-                batch.add_instance(PrimitiveInstance::from(instance));
+                batch.push(PrimitiveInstance::from(instance));
             }
             AlphaRenderItem::Composite(stacking_context_index,
                                        source_id,
@@ -278,7 +328,7 @@ impl AlphaRenderItem {
                                                                0,
                                                                z);
 
-                batch.add_instance(PrimitiveInstance::from(instance));
+                batch.push(PrimitiveInstance::from(instance));
             }
             AlphaRenderItem::Primitive(clip_scroll_group_index_opt, prim_index, z) => {
                 let prim_metadata = ctx.prim_store.get_metadata(prim_index);
@@ -325,39 +375,40 @@ impl AlphaRenderItem {
                         let corner_key = AlphaBatchKey::new(AlphaBatchKind::BorderCorner, flags, blend_mode, no_textures);
                         let edge_key = AlphaBatchKey::new(AlphaBatchKind::BorderEdge, flags, blend_mode, no_textures);
 
-                        batch_list.with_suitable_batch(&corner_key, item_bounding_rect, |batch| {
+                        // Work around borrow ck on borrowing batch_list twice.
+                        {
+                            let batch = batch_list.get_suitable_batch(&corner_key, item_bounding_rect);
                             for (i, instance_kind) in border_cpu.corner_instances.iter().enumerate() {
                                 let sub_index = i as i32;
                                 match *instance_kind {
                                     BorderCornerInstance::Single => {
-                                        batch.add_instance(base_instance.build(sub_index,
-                                                                               BorderCornerSide::Both as i32, 0));
+                                        batch.push(base_instance.build(sub_index,
+                                                                       BorderCornerSide::Both as i32, 0));
                                     }
                                     BorderCornerInstance::Double => {
-                                        batch.add_instance(base_instance.build(sub_index,
-                                                                               BorderCornerSide::First as i32, 0));
-                                        batch.add_instance(base_instance.build(sub_index,
-                                                                               BorderCornerSide::Second as i32, 0));
+                                        batch.push(base_instance.build(sub_index,
+                                                                       BorderCornerSide::First as i32, 0));
+                                        batch.push(base_instance.build(sub_index,
+                                                                       BorderCornerSide::Second as i32, 0));
                                     }
                                 }
                             }
-                        });
+                        }
 
-                        batch_list.with_suitable_batch(&edge_key, item_bounding_rect, |batch| {
-                            for border_segment in 0..4 {
-                                batch.add_instance(base_instance.build(border_segment, 0, 0));
-                            }
-                        });
+                        let batch = batch_list.get_suitable_batch(&edge_key, item_bounding_rect);
+                        for border_segment in 0..4 {
+                            batch.push(base_instance.build(border_segment, 0, 0));
+                        }
                     }
                     PrimitiveKind::Rectangle => {
                         let key = AlphaBatchKey::new(AlphaBatchKind::Rectangle, flags, blend_mode, no_textures);
                         let batch = batch_list.get_suitable_batch(&key, item_bounding_rect);
-                        batch.add_instance(base_instance.build(0, 0, 0));
+                        batch.push(base_instance.build(0, 0, 0));
                     }
                     PrimitiveKind::Line => {
                         let key = AlphaBatchKey::new(AlphaBatchKind::Line, flags, blend_mode, no_textures);
                         let batch = batch_list.get_suitable_batch(&key, item_bounding_rect);
-                        batch.add_instance(base_instance.build(0, 0, 0));
+                        batch.push(base_instance.build(0, 0, 0));
                     }
                     PrimitiveKind::Image => {
                         let image_cpu = &ctx.prim_store.cpu_images[prim_metadata.cpu_prim_index.0];
@@ -398,21 +449,16 @@ impl AlphaRenderItem {
 
                         let key = AlphaBatchKey::new(batch_kind, flags, blend_mode, textures);
                         let batch = batch_list.get_suitable_batch(&key, item_bounding_rect);
-                        batch.add_instance(base_instance.build(uv_address.as_int(gpu_cache), 0, 0));
+                        batch.push(base_instance.build(uv_address.as_int(gpu_cache), 0, 0));
                     }
                     PrimitiveKind::TextRun => {
                         let text_cpu = &ctx.prim_store.cpu_text_runs[prim_metadata.cpu_prim_index.0];
-                        let font_size_dp = text_cpu.logical_font_size.scale_by(ctx.device_pixel_ratio);
 
                         // TODO(gw): avoid / recycle this allocation in the future.
                         let mut instances = Vec::new();
 
-                        let font = FontInstance::new(text_cpu.font_key,
-                                                     font_size_dp,
-                                                     text_cpu.color,
-                                                     text_cpu.normal_render_mode,
-                                                     text_cpu.glyph_options,
-                                                     text_cpu.subpx_dir);
+                        let mut font = text_cpu.font.clone();
+                        font.size = font.size.scale_by(ctx.device_pixel_ratio);
 
                         let texture_id = ctx.resource_cache.get_glyphs(font,
                                                                        &text_cpu.glyph_keys,
@@ -429,7 +475,7 @@ impl AlphaRenderItem {
                             let key = AlphaBatchKey::new(AlphaBatchKind::TextRun, flags, blend_mode, textures);
                             let batch = batch_list.get_suitable_batch(&key, item_bounding_rect);
 
-                            batch.add_instances(&instances);
+                            batch.extend_from_slice(&instances);
                         }
                     }
                     PrimitiveKind::TextShadow => {
@@ -438,25 +484,25 @@ impl AlphaRenderItem {
                         let textures = BatchTextures::render_target_cache();
                         let key = AlphaBatchKey::new(AlphaBatchKind::CacheImage, flags, blend_mode, textures);
                         let batch = batch_list.get_suitable_batch(&key, item_bounding_rect);
-                        batch.add_instance(base_instance.build(0, cache_task_address.0 as i32, 0));
+                        batch.push(base_instance.build(0, cache_task_address.0 as i32, 0));
                     }
                     PrimitiveKind::AlignedGradient => {
                         let gradient_cpu = &ctx.prim_store.cpu_gradients[prim_metadata.cpu_prim_index.0];
                         let key = AlphaBatchKey::new(AlphaBatchKind::AlignedGradient, flags, blend_mode, no_textures);
                         let batch = batch_list.get_suitable_batch(&key, item_bounding_rect);
                         for part_index in 0..(gradient_cpu.stops_count - 1) {
-                            batch.add_instance(base_instance.build(part_index as i32, 0, 0));
+                            batch.push(base_instance.build(part_index as i32, 0, 0));
                         }
                     }
                     PrimitiveKind::AngleGradient => {
                         let key = AlphaBatchKey::new(AlphaBatchKind::AngleGradient, flags, blend_mode, no_textures);
                         let batch = batch_list.get_suitable_batch(&key, item_bounding_rect);
-                        batch.add_instance(base_instance.build(0, 0, 0));
+                        batch.push(base_instance.build(0, 0, 0));
                     }
                     PrimitiveKind::RadialGradient => {
                         let key = AlphaBatchKey::new(AlphaBatchKind::RadialGradient, flags, blend_mode, no_textures);
                         let batch = batch_list.get_suitable_batch(&key, item_bounding_rect);
-                        batch.add_instance(base_instance.build(0, 0, 0));
+                        batch.push(base_instance.build(0, 0, 0));
                     }
                     PrimitiveKind::YuvImage => {
                         let mut textures = BatchTextures::no_texture();
@@ -517,21 +563,22 @@ impl AlphaRenderItem {
                                                      textures);
                         let batch = batch_list.get_suitable_batch(&key, item_bounding_rect);
 
-                        batch.add_instance(base_instance.build(uv_rect_addresses[0],
-                                                               uv_rect_addresses[1],
-                                                               uv_rect_addresses[2]));
+                        batch.push(base_instance.build(uv_rect_addresses[0],
+                                                       uv_rect_addresses[1],
+                                                       uv_rect_addresses[2]));
                     }
                     PrimitiveKind::BoxShadow => {
                         let box_shadow = &ctx.prim_store.cpu_box_shadows[prim_metadata.cpu_prim_index.0];
                         let cache_task_id = prim_metadata.render_task_id.unwrap();
                         let cache_task_address = render_tasks.get_task_address(cache_task_id);
+                        let textures = BatchTextures::render_target_cache();
 
-                        let key = AlphaBatchKey::new(AlphaBatchKind::BoxShadow, flags, blend_mode, no_textures);
+                        let key = AlphaBatchKey::new(AlphaBatchKind::BoxShadow, flags, blend_mode, textures);
                         let batch = batch_list.get_suitable_batch(&key, item_bounding_rect);
 
                         for rect_index in 0..box_shadow.rects.len() {
-                            batch.add_instance(base_instance.build(rect_index as i32,
-                                                                   cache_task_address.0 as i32, 0));
+                            batch.push(base_instance.build(rect_index as i32,
+                                                           cache_task_address.0 as i32, 0));
                         }
                     }
                 }
@@ -553,7 +600,7 @@ impl AlphaRenderItem {
                                                                0,
                                                                z);
 
-                batch.add_instance(PrimitiveInstance::from(instance));
+                batch.push(PrimitiveInstance::from(instance));
             }
         }
     }
@@ -596,8 +643,8 @@ impl AlphaBatcher {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.batch_list.opaque_batches.is_empty() &&
-        self.batch_list.alpha_batches.is_empty()
+        self.batch_list.opaque_batch_list.batches.is_empty() &&
+        self.batch_list.alpha_batch_list.batches.is_empty()
     }
 }
 
@@ -855,7 +902,6 @@ impl<T: RenderTarget> RenderTargetList<T> {
 /// A render target represents a number of rendering operations on a surface.
 pub struct ColorRenderTarget {
     pub alpha_batcher: AlphaBatcher,
-    pub box_shadow_cache_prims: Vec<PrimitiveInstance>,
     // List of text runs to be cached to this render target.
     // TODO(gw): For now, assume that these all come from
     //           the same source texture id. This is almost
@@ -882,7 +928,6 @@ impl RenderTarget for ColorRenderTarget {
     fn new(size: DeviceUintSize) -> ColorRenderTarget {
         ColorRenderTarget {
             alpha_batcher: AlphaBatcher::new(),
-            box_shadow_cache_prims: Vec::new(),
             text_run_cache_prims: Vec::new(),
             line_cache_prims: Vec::new(),
             text_run_textures: BatchTextures::no_texture(),
@@ -942,18 +987,9 @@ impl RenderTarget for ColorRenderTarget {
             }
             RenderTaskKind::CachePrimitive(prim_index) => {
                 let prim_metadata = ctx.prim_store.get_metadata(prim_index);
-
                 let prim_address = prim_metadata.gpu_location.as_int(gpu_cache);
 
                 match prim_metadata.prim_kind {
-                    PrimitiveKind::BoxShadow => {
-                        let instance = SimplePrimitiveInstance::new(prim_address,
-                                                                    render_tasks.get_task_address(task_id),
-                                                                    RenderTaskAddress(0),
-                                                                    PackedLayerIndex(0),
-                                                                    0);     // z is disabled for rendering cache primitives
-                        self.box_shadow_cache_prims.push(instance.build(0, 0, 0));
-                    }
                     PrimitiveKind::TextShadow => {
                         let prim = &ctx.prim_store.cpu_text_shadows[prim_metadata.cpu_prim_index.0];
 
@@ -977,14 +1013,10 @@ impl RenderTarget for ColorRenderTarget {
                                     // the parent text-shadow prim address as a user data field, allowing
                                     // the shader to fetch the text-shadow parameters.
                                     let text = &ctx.prim_store.cpu_text_runs[sub_metadata.cpu_prim_index.0];
-                                    let font_size_dp = text.logical_font_size.scale_by(ctx.device_pixel_ratio);
 
-                                    let font = FontInstance::new(text.font_key,
-                                                                 font_size_dp,
-                                                                 text.color,
-                                                                 text.shadow_render_mode,
-                                                                 text.glyph_options,
-                                                                 text.subpx_dir);
+                                    let mut font = text.font.clone();
+                                    font.size = font.size.scale_by(ctx.device_pixel_ratio);
+                                    font.render_mode = text.shadow_render_mode;
 
                                     let texture_id = ctx.resource_cache.get_glyphs(font,
                                                                                    &text.glyph_keys,
@@ -1024,7 +1056,8 @@ impl RenderTarget for ColorRenderTarget {
                     }
                 }
             }
-            RenderTaskKind::CacheMask(..) => {
+            RenderTaskKind::CacheMask(..) |
+            RenderTaskKind::BoxShadow(..) => {
                 panic!("Should not be added to color target!");
             }
             RenderTaskKind::Readback(device_rect) => {
@@ -1036,6 +1069,7 @@ impl RenderTarget for ColorRenderTarget {
 
 pub struct AlphaRenderTarget {
     pub clip_batcher: ClipBatcher,
+    pub box_shadow_cache_prims: Vec<BoxShadowCacheInstance>,
     allocator: TextureAllocator,
 }
 
@@ -1047,6 +1081,7 @@ impl RenderTarget for AlphaRenderTarget {
     fn new(size: DeviceUintSize) -> AlphaRenderTarget {
         AlphaRenderTarget {
             clip_batcher: ClipBatcher::new(),
+            box_shadow_cache_prims: Vec::new(),
             allocator: TextureAllocator::new(size),
         }
     }
@@ -1072,6 +1107,21 @@ impl RenderTarget for AlphaRenderTarget {
             RenderTaskKind::Readback(..) => {
                 panic!("Should not be added to alpha target!");
             }
+            RenderTaskKind::BoxShadow(prim_index) => {
+                let prim_metadata = ctx.prim_store.get_metadata(prim_index);
+
+                match prim_metadata.prim_kind {
+                    PrimitiveKind::BoxShadow => {
+                        self.box_shadow_cache_prims.push(BoxShadowCacheInstance {
+                            prim_address: gpu_cache.get_address(&prim_metadata.gpu_location),
+                            task_index: render_tasks.get_task_address(task_id),
+                        });
+                    }
+                    _ => {
+                        panic!("BUG: invalid prim kind");
+                    }
+                }
+            }
             RenderTaskKind::CacheMask(ref task_info) => {
                 let task_address = render_tasks.get_task_address(task_id);
                 self.clip_batcher.add(task_address,
@@ -1094,8 +1144,8 @@ pub struct RenderPass {
     tasks: Vec<RenderTaskId>,
     pub color_targets: RenderTargetList<ColorRenderTarget>,
     pub alpha_targets: RenderTargetList<AlphaRenderTarget>,
-    pub color_texture_id: Option<TextureId>,
-    pub alpha_texture_id: Option<TextureId>,
+    pub color_texture: Option<Texture>,
+    pub alpha_texture: Option<Texture>,
     dynamic_tasks: FastHashMap<RenderTaskKey, DynamicTaskInfo>,
 }
 
@@ -1106,8 +1156,8 @@ impl RenderPass {
             color_targets: RenderTargetList::new(size, is_framebuffer),
             alpha_targets: RenderTargetList::new(size, false),
             tasks: vec![],
-            color_texture_id: None,
-            alpha_texture_id: None,
+            color_texture: None,
+            alpha_texture: None,
             dynamic_tasks: FastHashMap::default(),
         }
     }
@@ -1125,7 +1175,6 @@ impl RenderPass {
     }
 
     pub fn required_target_count(&self, kind: RenderTargetKind) -> usize {
-        debug_assert!(!self.is_framebuffer);        // framebuffer never needs targets
         match kind {
             RenderTargetKind::Color => self.color_targets.target_count(),
             RenderTargetKind::Alpha => self.alpha_targets.target_count(),
@@ -1407,27 +1456,34 @@ impl From<CompositePrimitiveInstance> for PrimitiveInstance {
 }
 
 #[derive(Debug)]
-pub struct PrimitiveBatch {
+pub struct AlphaPrimitiveBatch {
     pub key: AlphaBatchKey,
     pub instances: Vec<PrimitiveInstance>,
     pub item_rects: Vec<DeviceIntRect>,
 }
 
-impl PrimitiveBatch {
-    fn new(key: AlphaBatchKey) -> PrimitiveBatch {
-        PrimitiveBatch {
+impl AlphaPrimitiveBatch {
+    fn new(key: AlphaBatchKey) -> AlphaPrimitiveBatch {
+        AlphaPrimitiveBatch {
             key,
             instances: Vec::new(),
             item_rects: Vec::new(),
         }
     }
+}
 
-    fn add_instance(&mut self, instance: PrimitiveInstance) {
-        self.instances.push(instance);
-    }
+#[derive(Debug)]
+pub struct OpaquePrimitiveBatch {
+    pub key: AlphaBatchKey,
+    pub instances: Vec<PrimitiveInstance>,
+}
 
-    fn add_instances(&mut self, instances: &[PrimitiveInstance]) {
-        self.instances.extend_from_slice(instances);
+impl OpaquePrimitiveBatch {
+    fn new(key: AlphaBatchKey) -> OpaquePrimitiveBatch {
+        OpaquePrimitiveBatch {
+            key,
+            instances: Vec::new(),
+        }
     }
 }
 
@@ -1537,19 +1593,13 @@ pub struct PackedLayer {
     pub local_clip_rect: LayerRect,
 }
 
-impl Default for PackedLayer {
-    fn default() -> PackedLayer {
+impl PackedLayer {
+    pub fn empty() -> PackedLayer {
         PackedLayer {
             transform: LayerToWorldTransform::identity(),
             inv_transform: WorldToLayerTransform::identity(),
             local_clip_rect: LayerRect::zero(),
         }
-    }
-}
-
-impl PackedLayer {
-    pub fn empty() -> PackedLayer {
-        Default::default()
     }
 
     pub fn set_transform(&mut self, transform: LayerToWorldTransform) -> bool {

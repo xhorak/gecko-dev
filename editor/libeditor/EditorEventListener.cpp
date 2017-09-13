@@ -81,7 +81,8 @@ DoCommandCallback(Command aCommand, void* aData)
   const char* commandStr = WidgetKeyboardEvent::GetCommandStr(aCommand);
 
   nsCOMPtr<nsIController> controller;
-  root->GetControllerForCommand(commandStr, getter_AddRefs(controller));
+  root->GetControllerForCommand(commandStr, false /* for any window */,
+                                getter_AddRefs(controller));
   if (!controller) {
     return;
   }
@@ -1023,11 +1024,8 @@ EditorEventListener::CanDrop(nsIDOMDragEvent* aEvent)
   rv = aEvent->GetRangeOffset(&offset);
   NS_ENSURE_SUCCESS(rv, false);
 
-  int32_t rangeCount;
-  rv = selection->GetRangeCount(&rangeCount);
-  NS_ENSURE_SUCCESS(rv, false);
-
-  for (int32_t i = 0; i < rangeCount; i++) {
+  uint32_t rangeCount = selection->RangeCount();
+  for (uint32_t i = 0; i < rangeCount; i++) {
     RefPtr<nsRange> range = selection->GetRangeAt(i);
     if (!range) {
       // Don't bail yet, iterate through them all

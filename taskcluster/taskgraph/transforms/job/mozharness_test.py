@@ -26,26 +26,27 @@ BUILDER_NAME_PREFIX = {
     'linux64-ccov': 'Ubuntu Code Coverage VM 12.04 x64',
     'linux64-jsdcov': 'Ubuntu Code Coverage VM 12.04 x64',
     'linux64-qr': 'Ubuntu VM 12.04 x64',
-    'linux64-stylo': 'Ubuntu VM 12.04 x64',
+    'linux64-stylo-disabled': 'Ubuntu VM 12.04 x64',
     'linux64-stylo-sequential': 'Ubuntu VM 12.04 x64',
     'linux64-devedition': 'Ubuntu VM 12.04 x64',
     'linux64-devedition-nightly': 'Ubuntu VM 12.04 x64',
     'macosx64': 'Rev7 MacOSX Yosemite 10.10.5',
     'macosx64-devedition': 'Rev7 MacOSX Yosemite 10.10.5 DevEdition',
-    'android-4.3-arm7-api-15': 'Android 4.3 armv7 API 15+',
+    'android-4.3-arm7-api-16': 'Android 4.3 armv7 api-16+',
     'android-4.2-x86': 'Android 4.2 x86 Emulator',
-    'android-4.3-arm7-api-15-gradle': 'Android 4.3 armv7 API 15+',
+    'android-4.3-arm7-api-16-gradle': 'Android 4.3 armv7 api-16+',
     'windows10-64': 'Windows 10 64-bit',
     'windows10-64-nightly': 'Windows 10 64-bit',
+    'windows10-64-devedition': 'Windows 10 64-bit DevEdition',
     'windows10-64-pgo': 'Windows 10 64-bit',
     'windows10-64-asan': 'Windows 10 64-bit',
-    'windows10-64-stylo': 'Windows 10 64-bit',
+    'windows10-64-stylo-disabled': 'Windows 10 64-bit',
     'windows7-32': 'Windows 7 32-bit',
     ('windows7-32', 'virtual-with-gpu'): 'Windows 7 VM-GFX 32-bit',
     'windows7-32-nightly': 'Windows 7 32-bit',
     'windows7-32-devedition': 'Windows 7 32-bit DevEdition',
     'windows7-32-pgo': 'Windows 7 32-bit',
-    'windows7-32-stylo': 'Windows 7 32-bit',
+    'windows7-32-stylo-disabled': 'Windows 7 32-bit',
     'windows8-64': 'Windows 8 64-bit',
     'windows8-64-nightly': 'Windows 8 64-bit',
     'windows8-64-devedition': 'Windows 8 64-bit DevEdition',
@@ -102,9 +103,9 @@ def mozharness_test_on_docker(config, job, taskdesc):
 
     artifacts = [
         # (artifact name prefix, in-image path)
-        ("public/logs/", "/home/worker/workspace/build/upload/logs/"),
-        ("public/test", "/home/worker/artifacts/"),
-        ("public/test_info/", "/home/worker/workspace/build/blobber_upload_dir/"),
+        ("public/logs/", "/builds/worker/workspace/build/upload/logs/"),
+        ("public/test", "/builds/worker/artifacts/"),
+        ("public/test_info/", "/builds/worker/workspace/build/blobber_upload_dir/"),
     ]
 
     installer_url = get_artifact_url('<build>', mozharness['build-artifact-name'])
@@ -113,7 +114,7 @@ def mozharness_test_on_docker(config, job, taskdesc):
 
     worker['artifacts'] = [{
         'name': prefix,
-        'path': os.path.join('/home/worker/workspace', path),
+        'path': os.path.join('/builds/worker/workspace', path),
         'type': 'directory',
     } for (prefix, path) in artifacts]
 
@@ -121,7 +122,7 @@ def mozharness_test_on_docker(config, job, taskdesc):
         'type': 'persistent',
         'name': 'level-{}-{}-test-workspace'.format(
             config.params['level'], config.params['project']),
-        'mount-point': "/home/worker/workspace",
+        'mount-point': "/builds/worker/workspace",
     }]
 
     env = worker['env'] = {
@@ -156,7 +157,7 @@ def mozharness_test_on_docker(config, job, taskdesc):
 
     # assemble the command line
     command = [
-        '/home/worker/bin/run-task',
+        '/builds/worker/bin/run-task',
     ]
 
     # Support vcs checkouts regardless of whether the task runs from
@@ -166,14 +167,14 @@ def mozharness_test_on_docker(config, job, taskdesc):
     # If we have a source checkout, run mozharness from it instead of
     # downloading a zip file with the same content.
     if test['checkout']:
-        command.extend(['--vcs-checkout', '/home/worker/checkouts/gecko'])
-        env['MOZHARNESS_PATH'] = '/home/worker/checkouts/gecko/testing/mozharness'
+        command.extend(['--vcs-checkout', '/builds/worker/checkouts/gecko'])
+        env['MOZHARNESS_PATH'] = '/builds/worker/checkouts/gecko/testing/mozharness'
     else:
         env['MOZHARNESS_URL'] = {'task-reference': mozharness_url}
 
     command.extend([
         '--',
-        '/home/worker/bin/test-linux.sh',
+        '/builds/worker/bin/test-linux.sh',
     ])
 
     if mozharness.get('no-read-buildbot-config'):

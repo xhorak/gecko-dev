@@ -104,7 +104,7 @@ public:
   // Copies a region (aRegion) of the video frame stored in aVideoSample
   // into an image which is returned by aOutImage.
   HRESULT CopyToImage(IMFSample* aVideoSample,
-                      const nsIntRect& aRegion,
+                      const gfx::IntRect& aRegion,
                       Image** aOutImage) override;
 
   bool SupportsConfig(IMFMediaType* aType, float aFramerate) override;
@@ -187,10 +187,10 @@ HRESULT ConvertMFTypeToDXVAType(IMFMediaType *pType, DXVA2_VideoDesc *pDesc)
 
   GetDXVA2ExtendedFormatFromMFMediaType(pType, &pDesc->SampleFormat);
   pDesc->OutputFrameFreq = pDesc->InputSampleFreq;
-  if ((pDesc->SampleFormat.SampleFormat
-       == DXVA2_SampleFieldInterleavedEvenFirst)
-      || (pDesc->SampleFormat.SampleFormat
-          == DXVA2_SampleFieldInterleavedOddFirst)) {
+  if ((pDesc->SampleFormat.SampleFormat ==
+       DXVA2_SampleFieldInterleavedEvenFirst) ||
+      (pDesc->SampleFormat.SampleFormat ==
+       DXVA2_SampleFieldInterleavedOddFirst)) {
     pDesc->OutputFrameFreq.Numerator *= 2;
   }
 
@@ -373,8 +373,8 @@ D3D9DXVA2Manager::Init(layers::KnowsCompositor* aKnowsCompositor,
 
   bool found = false;
   for (UINT i = 0; i < deviceCount; i++) {
-    if (decoderDevices[i] == DXVA2_ModeH264_E
-        || decoderDevices[i] == DXVA2_Intel_ModeH264_E) {
+    if (decoderDevices[i] == DXVA2_ModeH264_E ||
+        decoderDevices[i] == DXVA2_Intel_ModeH264_E) {
       mDecoderGUID = decoderDevices[i];
       found = true;
       break;
@@ -439,7 +439,7 @@ D3D9DXVA2Manager::Init(layers::KnowsCompositor* aKnowsCompositor,
 
 HRESULT
 D3D9DXVA2Manager::CopyToImage(IMFSample* aSample,
-                              const nsIntRect& aRegion,
+                              const gfx::IntRect& aRegion,
                               Image** aOutImage)
 {
   RefPtr<IMFMediaBuffer> buffer;
@@ -611,7 +611,7 @@ public:
   // Copies a region (aRegion) of the video frame stored in aVideoSample
   // into an image which is returned by aOutImage.
   HRESULT CopyToImage(IMFSample* aVideoSample,
-                      const nsIntRect& aRegion,
+                      const gfx::IntRect& aRegion,
                       Image** aOutImage) override;
 
   virtual HRESULT CopyToBGRATexture(ID3D11Texture2D *aInTexture,
@@ -824,8 +824,8 @@ D3D11DXVA2Manager::InitInternal(layers::KnowsCompositor* aKnowsCompositor,
   for (UINT i = 0; i < profileCount; i++) {
     GUID id;
     hr = videoDevice->GetVideoDecoderProfile(i, &id);
-    if (SUCCEEDED(hr)
-        && (id == DXVA2_ModeH264_E || id == DXVA2_Intel_ModeH264_E)) {
+    if (SUCCEEDED(hr) &&
+        (id == DXVA2_ModeH264_E || id == DXVA2_Intel_ModeH264_E)) {
       mDecoderGUID = id;
       found = true;
       break;
@@ -908,7 +908,7 @@ D3D11DXVA2Manager::CreateOutputSample(RefPtr<IMFSample>& aSample,
 
 HRESULT
 D3D11DXVA2Manager::CopyToImage(IMFSample* aVideoSample,
-                               const nsIntRect& aRegion,
+                               const gfx::IntRect& aRegion,
                                Image** aOutImage)
 {
   NS_ENSURE_TRUE(aVideoSample, E_POINTER);
@@ -1263,9 +1263,9 @@ DXVA2Manager::IsUnsupportedResolution(const uint32_t& aWidth,
   // AMD cards with UVD3 or earlier perform poorly trying to decode 1080p60 in
   // hardware, so use software instead. Pick 45 as an arbitrary upper bound for
   // the framerate we can handle.
-  return mIsAMDPreUVD4
-         && (aWidth >= 1920 || aHeight >= 1088)
-         && aFramerate > 45;
+  return mIsAMDPreUVD4 &&
+         (aWidth >= 1920 || aHeight >= 1088) &&
+         aFramerate > 45;
 }
 
 } // namespace mozilla

@@ -6,7 +6,6 @@
 
 @namespace url("http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul");
 @namespace html url("http://www.w3.org/1999/xhtml");
-@namespace svg url("http://www.w3.org/2000/svg");
 
 %include ../shared/browser.inc.css
 
@@ -546,10 +545,6 @@ html|*.urlbar-input:-moz-lwtheme::placeholder,
   color: inherit;
 }
 
-.search-go-container {
-  padding: 2px 2px;
-}
-
 #urlbar-search-footer {
   border-top: 1px solid var(--panel-separator-color);
   background-color: var(--arrowpanel-dimmed);
@@ -678,18 +673,6 @@ html|span.ac-emphasize-text-url {
   }
 }
 
-.autocomplete-richlistitem:hover,
-treechildren.searchbar-treebody::-moz-tree-row(hover) {
-  background-color: var(--arrowpanel-dimmed);
-  border-color: var(--panel-separator-color);
-}
-
-.autocomplete-richlistitem[selected],
-treechildren.searchbar-treebody::-moz-tree-row(selected) {
-  background-color: Highlight;
-  color: HighlightText;
-}
-
 .ac-type-icon[type=bookmark] {
   list-style-image: url("chrome://browser/skin/bookmark.svg");
   -moz-context-properties: fill;
@@ -745,10 +728,6 @@ treechildren.searchbar-treebody::-moz-tree-row(selected) {
   list-style-image: url("chrome://browser/skin/places/starred48.png");
   width: 48px;
   height: 48px;
-}
-
-#editBookmarkPanelStarIcon[unstarred] {
-  list-style-image: url("chrome://browser/skin/places/unstarred48.png");
 }
 
 #editBookmarkPanelTitle {
@@ -1116,6 +1095,9 @@ notification[value="translation"] {
 #private-browsing-indicator-titlebar {
   display: block;
   position: absolute;
+  /* Need to ensure this gets positioned on top of the position:relative #navigator-toolbox
+   * in case the dark/light themes give that item a background. */
+  z-index: 1;
 }
 
 #main-window[privatebrowsingmode=temporary][tabsintitlebar] #private-browsing-indicator-titlebar > .private-browsing-indicator {

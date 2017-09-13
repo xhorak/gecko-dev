@@ -364,6 +364,7 @@ class BaseCompiler
 #endif
 
     typedef Vector<NonAssertingLabel, 8, SystemAllocPolicy> LabelVector;
+    typedef Vector<MIRType, 8, SystemAllocPolicy> MIRTypeVector;
 
     // The strongly typed register wrappers have saved my bacon a few
     // times; though they are largely redundant they stay, for now.
@@ -569,7 +570,7 @@ class BaseCompiler
 
     const ModuleEnvironment&    env_;
     BaseOpIter                  iter_;
-    const FuncBytes&            func_;
+    const FuncCompileUnit&      func_;
     size_t                      lastReadCallSite_;
     TempAllocator&              alloc_;
     const ValTypeVector&        locals_;         // Types of parameters and locals
@@ -644,7 +645,7 @@ class BaseCompiler
   public:
     BaseCompiler(const ModuleEnvironment& env,
                  Decoder& decoder,
-                 const FuncBytes& func,
+                 const FuncCompileUnit& func,
                  const ValTypeVector& locals,
                  bool debugEnabled,
                  TempAllocator* alloc,
@@ -656,6 +657,9 @@ class BaseCompiler
     FuncOffsets finish();
 
     MOZ_MUST_USE bool emitFunction();
+    void emitInitStackLocals();
+
+    const SigWithId& sig() const { return *env_.funcSigs[func_.index()]; }
 
     // Used by some of the ScratchRegister implementations.
     operator MacroAssembler&() const { return masm; }
@@ -2234,7 +2238,7 @@ class BaseCompiler
 
         // Copy arguments from registers to stack.
 
-        const ValTypeVector& args = func_.sig().args();
+        const ValTypeVector& args = sig().args();
 
         for (ABIArgIter<const ValTypeVector> i(args); !i.done(); i++) {
             Local& l = localInfo_[i.index()];
@@ -2260,26 +2264,8 @@ class BaseCompiler
             }
         }
 
-        // Initialize the stack locals to zero.
-        //
-        // The following are all Bug 1316820:
-        //
-        // TODO / OPTIMIZE: on x64, at least, scratch will be a 64-bit
-        // register and we can move 64 bits at a time.
-        //
-        // TODO / OPTIMIZE: On SSE2 or better SIMD systems we may be
-        // able to store 128 bits at a time.  (I suppose on some
-        // systems we have 512-bit SIMD for that matter.)
-        //
-        // TODO / OPTIMIZE: if we have only one initializing store
-        // then it's better to store a zero literal, probably.
-
-        if (varLow_ < varHigh_) {
-            ScratchI32 scratch(*this);
-            masm.mov(ImmWord(0), scratch);
-            for (int32_t i = varLow_ ; i < varHigh_ ; i += 4)
-                storeToFrameI32(scratch, i + 4);
-        }
+        if (varLow_ < varHigh_)
+            emitInitStackLocals();
 
         if (debugEnabled_)
             insertBreakablePoint(CallSiteDesc::EnterFrame);
@@ -2289,7 +2275,7 @@ class BaseCompiler
         MOZ_ASSERT(debugEnabled_);
         size_t debugFrameOffset = masm.framePushed() - DebugFrame::offsetOfFrame();
         Address resultsAddress(StackPointer, debugFrameOffset + DebugFrame::offsetOfResults());
-        switch (func_.sig().ret()) {
+        switch (sig().ret()) {
           case ExprType::Void:
             break;
           case ExprType::I32:
@@ -2314,7 +2300,7 @@ class BaseCompiler
         MOZ_ASSERT(debugEnabled_);
         size_t debugFrameOffset = masm.framePushed() - DebugFrame::offsetOfFrame();
         Address resultsAddress(StackPointer, debugFrameOffset + DebugFrame::offsetOfResults());
-        switch (func_.sig().ret()) {
+        switch (sig().ret()) {
           case ExprType::Void:
             break;
           case ExprType::I32:
@@ -4276,7 +4262,7 @@ BaseCompiler::emitQuotientI64()
             Label positive;
             masm.branchTest64(Assembler::NotSigned, r, r, Register::Invalid(),
                               &positive);
-            masm.add64(Imm32(c-1), r);
+            masm.add64(Imm64(c-1), r);
             masm.bind(&positive);
 
             masm.rshift64Arithmetic(Imm32(power & 63), r);
@@ -5838,7 +5824,7 @@ BaseCompiler::emitReturn()
     if (deadCode_)
         return true;
 
-    doReturn(func_.sig().ret(), PopStack(true));
+    doReturn(sig().ret(), PopStack(true));
     deadCode_ = true;
 
     return true;
@@ -6907,7 +6893,7 @@ BaseCompiler::emitCurrentMemory()
 bool
 BaseCompiler::emitBody()
 {
-    if (!iter_.readFunctionStart(func_.sig().ret()))
+    if (!iter_.readFunctionStart(sig().ret()))
         return false;
 
     initControl(controlItem());
@@ -6989,7 +6975,7 @@ BaseCompiler::emitBody()
 
             if (iter_.controlStackEmpty()) {
                 if (!deadCode_)
-                    doReturn(func_.sig().ret(), PopStack(false));
+                    doReturn(sig().ret(), PopStack(false));
                 return iter_.readFunctionEnd(iter_.end());
             }
             NEXT();
@@ -7497,9 +7483,110 @@ BaseCompiler::emitFunction()
     return true;
 }
 
+void
+BaseCompiler::emitInitStackLocals()
+{
+    MOZ_ASSERT(varLow_ < varHigh_, "there should be stack locals to initialize");
+
+    static const uint32_t wordSize = sizeof(void*);
+
+    // A local's localOffset always points above it in the frame, so that when
+    // translated to a stack address we end up with an address pointing to the
+    // base of the local.  Thus to go from a raw frame offset to an SP offset we
+    // first add K to the frame offset to obtain a localOffset for a slot of
+    // size K, and then map that to an SP offset.  Hence all the adjustments to
+    // `low` in the offset calculations below.
+
+    // On 64-bit systems we may have 32-bit alignment for the local area as it
+    // may be preceded by parameters and prologue/debug data.
+
+    uint32_t low = varLow_;
+    if (low % wordSize) {
+        masm.store32(Imm32(0), Address(StackPointer, localOffsetToSPOffset(low + 4)));
+        low += 4;
+    }
+    MOZ_ASSERT(low % wordSize == 0);
+
+    const uint32_t high = AlignBytes(varHigh_, wordSize);
+    MOZ_ASSERT(high <= uint32_t(localSize_), "localSize_ should be aligned at least that");
+
+    // An unrollLimit of 16 is chosen so that we only need an 8-bit signed
+    // immediate to represent the offset in the store instructions in the loop
+    // on x64.
+
+    const uint32_t unrollLimit = 16;
+    const uint32_t initWords = (high - low) / wordSize;
+    const uint32_t tailWords = initWords % unrollLimit;
+    const uint32_t loopHigh = high - (tailWords * wordSize);
+
+    // With only one word to initialize, just store an immediate zero.
+
+    if (initWords == 1) {
+        masm.storePtr(ImmWord(0), Address(StackPointer, localOffsetToSPOffset(low + wordSize)));
+        return;
+    }
+
+    // For other cases, it's best to have a zero in a register.
+    //
+    // One can do more here with SIMD registers (store 16 bytes at a time) or
+    // with instructions like STRD on ARM (store 8 bytes at a time), but that's
+    // for another day.
+
+    RegI32 zero = needI32();
+    masm.mov(ImmWord(0), zero);
+
+    // For the general case we want to have a loop body of unrollLimit stores
+    // and then a tail of less than unrollLimit stores.  When initWords is less
+    // than 2*unrollLimit the loop trip count is at most 1 and there is no
+    // benefit to having the pointer calculations and the compare-and-branch.
+    // So we completely unroll when we have initWords < 2 * unrollLimit.  (In
+    // this case we'll end up using 32-bit offsets on x64 for up to half of the
+    // stores, though.)
+
+    // Fully-unrolled case.
+
+    if (initWords < 2 * unrollLimit)  {
+        for (uint32_t i = low; i < high; i += wordSize)
+            masm.storePtr(zero, Address(StackPointer, localOffsetToSPOffset(i + wordSize)));
+        freeGPR(zero);
+        return;
+    }
+
+    // Unrolled loop with a tail. Stores will use negative offsets. That's OK
+    // for x86 and ARM, at least.
+
+    // Compute pointer to the highest-addressed slot on the frame.
+    RegI32 p = needI32();
+    masm.computeEffectiveAddress(Address(StackPointer, localOffsetToSPOffset(low + wordSize)),
+                                 p);
+
+    // Compute pointer to the lowest-addressed slot on the frame that will be
+    // initialized by the loop body.
+    RegI32 lim = needI32();
+    masm.computeEffectiveAddress(Address(StackPointer,
+                                         localOffsetToSPOffset(loopHigh + wordSize)),
+                                 lim);
+
+    // The loop body.  Eventually we'll have p == lim and exit the loop.
+    Label again;
+    masm.bind(&again);
+    for (uint32_t i = 0; i < unrollLimit; ++i)
+        masm.storePtr(zero, Address(p, -(wordSize * i)));
+    masm.subPtr(Imm32(unrollLimit * wordSize), p);
+    masm.branchPtr(Assembler::LessThan, lim, p, &again);
+
+    // The tail.
+    for (uint32_t i = 0; i < tailWords; ++i)
+        masm.storePtr(zero, Address(p, -(wordSize * i)));
+
+    freeGPR(p);
+    freeGPR(lim);
+    freeGPR(zero);
+}
+
 BaseCompiler::BaseCompiler(const ModuleEnvironment& env,
                            Decoder& decoder,
-                           const FuncBytes& func,
+                           const FuncCompileUnit& func,
                            const ValTypeVector& locals,
                            bool debugEnabled,
                            TempAllocator* alloc,
@@ -7588,11 +7675,10 @@ BaseCompiler::init()
     if (!SigI64I64_.append(ValType::I64) || !SigI64I64_.append(ValType::I64))
         return false;
 
-    const ValTypeVector& args = func_.sig().args();
-
     if (!localInfo_.resize(locals_.length()))
         return false;
 
+    const ValTypeVector& args = sig().args();
     BaseLocalIter i(locals_, args.length(), debugEnabled_);
     varLow_ = i.reservedSize();
     for (; !i.done() && i.index() < args.length(); i++) {
@@ -7657,19 +7743,17 @@ js::wasm::BaselineCanCompile()
 }
 
 bool
-js::wasm::BaselineCompileFunction(CompileTask* task, FuncCompileUnit* unit, UniqueChars *error)
+js::wasm::BaselineCompileFunction(CompileTask* task, FuncCompileUnit* func, UniqueChars* error)
 {
     MOZ_ASSERT(task->tier() == Tier::Baseline);
     MOZ_ASSERT(task->env().kind == ModuleKind::Wasm);
 
-    const FuncBytes& func = unit->func();
-
-    Decoder d(func.bytes().begin(), func.bytes().end(), func.lineOrBytecode(), error);
+    Decoder d(func->begin(), func->end(), func->lineOrBytecode(), error);
 
     // Build the local types vector.
 
     ValTypeVector locals;
-    if (!locals.appendAll(func.sig().args()))
+    if (!locals.appendAll(task->env().funcSigs[func->index()]->args()))
         return false;
     if (!DecodeLocalEntries(d, task->env().kind, &locals))
         return false;
@@ -7680,7 +7764,7 @@ js::wasm::BaselineCompileFunction(CompileTask* task, FuncCompileUnit* unit, Uniq
 
     // One-pass baseline compilation.
 
-    BaseCompiler f(task->env(), d, func, locals, task->debugEnabled(), &task->alloc(),
+    BaseCompiler f(task->env(), d, *func, locals, task->debugEnabled(), &task->alloc(),
                    &task->masm(), task->mode());
     if (!f.init())
         return false;
@@ -7688,7 +7772,7 @@ js::wasm::BaselineCompileFunction(CompileTask* task, FuncCompileUnit* unit, Uniq
     if (!f.emitFunction())
         return false;
 
-    unit->finish(f.finish());
+    func->finish(f.finish());
     return true;
 }
 
