@@ -235,7 +235,6 @@ static void     screen_composited_changed_cb     (GdkScreen* screen,
                                                   gpointer user_data);
 static void     widget_composited_changed_cb     (GtkWidget* widget,
                                                   gpointer user_data);
-
 #if (MOZ_WIDGET_GTK == 3)
 static void     scale_changed_cb          (GtkWidget* widget,
                                            GParamSpec* aPSpec,
@@ -1134,6 +1133,12 @@ nsWindow::Resize(double aWidth, double aHeight, bool aRepaint)
     // For top-level windows, aWidth and aHeight should possibly be
     // interpreted as frame bounds, but NativeResize treats these as window
     // bounds (Bug 581866).
+
+    // When we draw decorations add extra space to draw shadows around the main window.
+    if (mDrawWindowDecoration) {
+      width += mDecorationSize.left + mDecorationSize.right;
+      height += mDecorationSize.top + mDecorationSize.bottom;
+    }
 
     mBounds.SizeTo(width, height);
 
@@ -2447,14 +2452,6 @@ nsWindow::OnSizeAllocate(GtkAllocation *aAllocation)
     LOG(("size_allocate [%p] %d %d %d %d\n",
          (void *)this, aAllocation->x, aAllocation->y,
          aAllocation->width, aAllocation->height));
-
-    // We need to apply to CSD margin before mBounds.Size() == size to
-    // add extra space around container.
-    // TODO - resize/reflow our internal widgets - it may cut upper part of content.
-    if (mDecorationSizeChanged) {
-       UpdateClientDecorationWindow();
-       mDecorationSizeChanged = false;
-    }
 
     LayoutDeviceIntSize size = GdkRectToDevicePixels(*aAllocation).Size();
 
@@ -3890,7 +3887,6 @@ nsWindow::Create(nsIWidget* aParent,
 
             GtkStyleContext* style = gtk_widget_get_style_context(mShell);
             drawToContainer = gtk_style_context_has_class(style, "csd");
-            // TODO -> csd style is not detected!!
         }
 #endif
         drawWidget = (drawToContainer) ? container : mShell;
@@ -6762,7 +6758,6 @@ nsWindow::SetDrawsInTitlebar(bool aState)
     return;
 
   if (mShell) {
-    NS_WARNING("gtk_window_set_decorated may not have any effect when called on a window that is already visible.");
     gtk_window_set_decorated(GTK_WINDOW(mShell), !aState);
     gtk_widget_set_app_paintable(mShell, aState);
   }
@@ -7068,9 +7063,6 @@ nsWindow::UpdateClientDecorations()
 
   gint top = 0, right = 0, bottom = 0, left = 0;
   if (mSizeState == nsSizeMode_Normal) {
-      // TODO - possible optimization:
-      // When a theme sets CSD border size to 0 we can just disable Gtk+
-      // header bar and don't do any shadows rendering.
       moz_gtk_get_window_border(&top, &right, &bottom, &left);
   }
 
@@ -7085,21 +7077,23 @@ nsWindow::UpdateClientDecorations()
   mDecorationSize.top = top;
   mDecorationSize.bottom = bottom;
 
+  // Gtk+ doesn't like when we set mContainer margin bigger than actual
+  // mContainer window size. That happens when we're called early and the
+  // mShell/mContainer is not allocated/resized yet and has default 1x1 size.
+  // Just resize to some minimal value which will be changed
+  // by Gecko soon.
   GtkAllocation allocation;
-  gtk_widget_get_allocation(GTK_WIDGET(mShell), &allocation);
-  if (allocation.width < left+right || allocation.height < top+bottom) {
-      // Gtk+ doesn't like when we set mContainer margin bigger than mShell
-      // window size. That happens when we're called by SetDrawsInTitlebar()
-      // early when the mShell/mContainer is not allocated/resized yet.
-      mDecorationSizeChanged = true;
-  } else {
-      UpdateClientDecorationWindow();
+  gtk_widget_get_allocation(GTK_WIDGET(mContainer), &allocation);
+  if (allocation.width < left + right || allocation.height < top + bottom) {
+      gtk_widget_get_preferred_width(GTK_WIDGET(mContainer), nullptr,
+                                     &allocation.width);
+      gtk_widget_get_preferred_height(GTK_WIDGET(mContainer), nullptr,
+                                      &allocation.height);
+      allocation.width += left + right + 1;
+      allocation.height += top + bottom + 1;
+      gtk_widget_size_allocate(GTK_WIDGET(mContainer), &allocation);
   }
-}
 
-void
-nsWindow::UpdateClientDecorationWindow()
-{
   gtk_widget_set_margin_left(GTK_WIDGET(mContainer), mDecorationSize.left);
   gtk_widget_set_margin_right(GTK_WIDGET(mContainer), mDecorationSize.right);
   gtk_widget_set_margin_top(GTK_WIDGET(mContainer), mDecorationSize.top);
