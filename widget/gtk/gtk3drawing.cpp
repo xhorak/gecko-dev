@@ -256,14 +256,14 @@ moz_gtk_get_window_border(gint* top, gint* right, gint* bottom, gint* left)
   MOZ_ASSERT(gtk_check_version(3, 20, 0) == nullptr,
              "Window decorations are only supported on GTK 3.20+.");
 
-  GtkStyleContext* style = ClaimStyleContext(MOZ_GTK_WINDOW);
+  GtkStyleContext* style = GetStyleContext(MOZ_GTK_WINDOW);
 
   *top = *right = *bottom = *left = 0;
   moz_gtk_add_border_padding(style, left, top, right, bottom);
   GtkBorder windowMargin;
   gtk_style_context_get_margin(style, GTK_STATE_FLAG_NORMAL, &windowMargin);
 
-  style = ClaimStyleContext(MOZ_GTK_WINDOW_DECORATION);
+  style = GetStyleContext(MOZ_GTK_WINDOW_DECORATION);
 
   // Available on GTK 3.20+.
   static auto sGtkRenderBackgroundGetClip =
@@ -2027,14 +2027,12 @@ moz_gtk_header_bar_paint(WidgetNodeType widgetType,
     GtkStateFlags state_flags = GetStateFlagsFromGtkWidgetState(state);
     GtkStyleContext *style;
 
-    style = ClaimStyleContext(widgetType, GTK_TEXT_DIR_LTR,
+    style = GetStyleContext(widgetType, GTK_TEXT_DIR_LTR,
                               state_flags);
     InsetByMargin(rect, style);
     gtk_render_background(style, cr, rect->x, rect->y, rect->width,
                           rect->height);
     gtk_render_frame(style, cr, rect->x, rect->y, rect->width, rect->height);
-
-    ReleaseStyleContext(style);
 
     return MOZ_GTK_SUCCESS;
 }
@@ -2306,18 +2304,16 @@ moz_gtk_get_widget_border(WidgetNodeType widget, gint* left, gint* top,
     case MOZ_GTK_HEADER_BAR:
     case MOZ_GTK_HEADER_BAR_MAXIMIZED:
         {
-            style = ClaimStyleContext(widget);
+            style = GetStyleContext(widget);
             moz_gtk_add_border_padding(style, left, top, right, bottom);
-            ReleaseStyleContext(style);
             return MOZ_GTK_SUCCESS;
         }
     case MOZ_GTK_HEADER_BAR_BUTTON_CLOSE:
     case MOZ_GTK_HEADER_BAR_BUTTON_MINIMIZE:
     case MOZ_GTK_HEADER_BAR_BUTTON_MAXIMIZE:
         {
-            style = ClaimStyleContext(widget);
+            style = GetStyleContext(widget);
             moz_gtk_add_margin_border_padding(style, left, top, right, bottom);
-            ReleaseStyleContext(style);
             return MOZ_GTK_SUCCESS;
         }
 
@@ -2774,7 +2770,7 @@ moz_gtk_window_decoration_paint(cairo_t *cr, GdkRectangle* rect)
     cairo_fill(cr);
     cairo_restore(cr);
 
-    GtkStyleContext* style = ClaimStyleContext(MOZ_GTK_WINDOW_DECORATION,
+    GtkStyleContext* style = GetStyleContext(MOZ_GTK_WINDOW_DECORATION,
                                                GTK_TEXT_DIR_NONE);
     rect->x += left;
     rect->y += top;
