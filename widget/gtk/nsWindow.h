@@ -556,7 +556,6 @@ private:
     // If true, draw our own window decorations (where supported).
     bool              mDrawWindowDecoration;
     GtkBorder         mDecorationSize;
-    bool              mDecorationSizeChanged;
 
     static bool DragInProgress(void);
 

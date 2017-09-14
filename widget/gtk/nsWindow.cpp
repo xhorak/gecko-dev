@@ -487,7 +487,6 @@ nsWindow::nsWindow()
     mPendingConfigures = 0;
     mDrawWindowDecoration = false;
     mDecorationSize = {0,0,0,0};
-    mDecorationSizeChanged = false;
 }
 
 nsWindow::~nsWindow()
