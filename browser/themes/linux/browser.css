@@ -792,22 +792,43 @@ html|span.ac-emphasize-text-url {
   padding: 3px;
 }
 
+@media not all and (-moz-gtk-csd-available) {
+  #main-window > #titlebar {
+    /* We need to hide the titlebar explicitly on versions of GTK without CSD. */
+    display: none;
+  }
+}
+
 /* Titlebar/CSD */
 @media (-moz-gtk-csd-available) {
-  #main-window[tabsintitlebar][sizemode="normal"]:not([customizing]):not(:-moz-lwtheme) > #titlebar {
-    -moz-appearance: -moz-window-titlebar;
+  #main-window[tabsintitlebar][sizemode="normal"] > #titlebar {
+    min-height: calc(var(--tab-min-height) + 12px);
   }
 
-  #main-window[tabsintitlebar][sizemode="maximized"]:not([customizing]):not(:-moz-lwtheme) > #titlebar {
+  #main-window[tabsintitlebar] #titlebar:-moz-lwtheme {
+    visibility: hidden;
+  }
+  #main-window[tabsintitlebar] #titlebar-content:-moz-lwtheme {
+    visibility: visible;
+  }
+
+  #main-window[tabsintitlebar][sizemode="normal"] > #titlebar {
+    -moz-appearance: -moz-window-titlebar;
+  }
+  #main-window[tabsintitlebar][sizemode="maximized"] > #titlebar {
     -moz-appearance: -moz-window-titlebar-maximized;
   }
 
-  #main-window[tabsintitlebar]:not([sizemode="fullscreen"]) #TabsToolbar {
-    -moz-appearance: none;
+  /* The button box must appear on top of the navigator-toolbox in order for
+   * click and hover mouse events to work properly for the button in the restored
+   * window state. Otherwise, elements in the navigator-toolbox, like the menubar,
+   * can swallow those events.
+   */
+  #titlebar-buttonbox {
+    z-index: 1;
   }
 
   /* titlebar command buttons */
-
   #titlebar-min {
     list-style-image: url("moz-icon://stock/window-minimize-symbolic?size=menu");
     -moz-appearance: -moz-window-button-minimize;
