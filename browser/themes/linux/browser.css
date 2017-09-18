@@ -829,6 +829,7 @@ html|span.ac-emphasize-text-url {
   }
 
   /* titlebar command buttons */
+  /* Use full scale icons here as the Gtk+ does. */
   #titlebar-min {
     list-style-image: url("moz-icon://stock/window-minimize-symbolic");
     -moz-appearance: -moz-window-button-minimize;
