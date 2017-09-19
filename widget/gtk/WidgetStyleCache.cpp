@@ -565,6 +565,7 @@ CreateHeaderBar(bool aMaximized)
   return headerbar;
 }
 
+// TODO - Also return style for buttons located at Maximized toolbar.
 static GtkWidget*
 CreateHeaderBarButton(WidgetNodeType aWidgetType)
 {
