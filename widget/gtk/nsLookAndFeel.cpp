@@ -670,6 +670,18 @@ nsLookAndFeel::GetIntImpl(IntID aID, int32_t &aResult)
         EnsureInit();
         aResult = sCSDAvailable;
         break;
+    case eIntID_GTKCSDMaximizeButton:
+        EnsureInit();
+        aResult = sCSDMaximizeButton;
+        break;
+    case eIntID_GTKCSDMinimizeButton:
+        EnsureInit();
+        aResult = sCSDMinimizeButton;
+        break;
+    case eIntID_GTKCSDCloseButton:
+        EnsureInit();
+        aResult = sCSDCloseButton;
+        break;
     default:
         aResult = 0;
         res     = NS_ERROR_FAILURE;
@@ -1071,6 +1083,30 @@ nsLookAndFeel::EnsureInit()
         sCSDAvailable =
             mozilla::Preferences::GetBool("widget.allow-client-side-decoration",
                                           false);
+    }
+
+    const gchar* decorationLayout = nullptr;
+    if (gtk_check_version(3, 12, 0) == nullptr) {
+        static auto sGtkHeaderBarGetDecorationLayoutPtr =
+          (const gchar* (*)(GtkWidget*))
+          dlsym(RTLD_DEFAULT, "gtk_header_bar_get_decoration_layout");
+
+        GtkWidget* headerBar = GetWidget(MOZ_GTK_HEADER_BAR);
+        decorationLayout = sGtkHeaderBarGetDecorationLayoutPtr(headerBar);
+        if (!decorationLayout) {
+            g_object_get(settings, "gtk-decoration-layout", &decorationLayout,
+                         nullptr);
+        }
+    }
+
+    if (decorationLayout) {
+        sCSDCloseButton = (strstr(decorationLayout, "close") != nullptr);
+        sCSDMaximizeButton = (strstr(decorationLayout, "maximize") != nullptr);
+        sCSDMinimizeButton = (strstr(decorationLayout, "minimize") != nullptr);
+    } else {
+        sCSDCloseButton = true;
+        sCSDMaximizeButton = true;
+        sCSDMinimizeButton = true;
     }
 }
 

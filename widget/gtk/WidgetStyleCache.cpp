@@ -537,6 +537,8 @@ CreateHeaderBar(bool aMaximized)
 {
   MOZ_ASSERT(gtk_check_version(3, 10, 0) == nullptr,
              "GtkHeaderBar is only available on GTK 3.10+.");
+  if (gtk_check_version(3, 10, 0) != nullptr)
+    return nullptr;
 
   static auto sGtkHeaderBarNewPtr = (GtkWidget* (*)())
     dlsym(RTLD_DEFAULT, "gtk_header_bar_new");
@@ -569,6 +571,12 @@ CreateHeaderBar(bool aMaximized)
 static GtkWidget*
 CreateHeaderBarButton(WidgetNodeType aWidgetType)
 {
+  MOZ_ASSERT(gtk_check_version(3, 10, 0) == nullptr,
+             "GtkHeaderBar is only available on GTK 3.10+.");
+
+  if (gtk_check_version(3, 10, 0) != nullptr)
+    return nullptr;
+
   static const char* MOZ_GTK_STYLE_CLASS_TITLEBUTTON = "titlebutton";
 
   GtkWidget* widget = gtk_button_new();

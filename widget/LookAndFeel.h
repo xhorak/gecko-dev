@@ -399,6 +399,24 @@ public:
      eIntID_GTKCSDAvailable,
 
      /*
+      * A boolean value indicating whether client-side decorations should
+      * contain a minimize button.
+      */
+     eIntID_GTKCSDMinimizeButton,
+
+     /*
+      * A boolean value indicating whether client-side decorations should
+      * contain a maximize button.
+      */
+     eIntID_GTKCSDMaximizeButton,
+
+     /*
+      * A boolean value indicating whether client-side decorations should
+      * contain a close button.
+      */
+     eIntID_GTKCSDCloseButton,
+
+     /*
       * Controls whether overlay scrollbars display when the user moves
       * the mouse in a scrollable frame.
       */
