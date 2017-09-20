@@ -73,6 +73,7 @@ import org.mozilla.gecko.DynamicToolbar.VisibilityTransition;
 import org.mozilla.gecko.Tabs.TabEvents;
 import org.mozilla.gecko.activitystream.ActivityStream;
 import org.mozilla.gecko.activitystream.ActivityStreamTelemetry;
+import org.mozilla.gecko.activitystream.homepanel.stream.StreamOverridablePageIconLayout;
 import org.mozilla.gecko.adjust.AdjustBrowserAppDelegate;
 import org.mozilla.gecko.animation.PropertyAnimator;
 import org.mozilla.gecko.annotation.RobocopTarget;
@@ -183,6 +184,7 @@ import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 import static org.mozilla.gecko.mma.MmaDelegate.NEW_TAB;
@@ -349,6 +351,12 @@ public class BrowserApp extends GeckoApp
     @NonNull
     private SearchEngineManager mSearchEngineManager; // Contains reference to Context - DO NOT LEAK!
 
+    // Ideally, we would set this cache from the specific places it is used in Activity Stream. However, given that
+    // it's unlikely that StreamOverridablePageIconLayout will be used elsewhere and how messy it is to pass references
+    // from an object with the application lifecycle to the individual views using the cache in activity stream, we settle
+    // for storing it here and setting it on all new instances.
+    private final Set<String> mStreamIconLayoutFailedRequestCache = StreamOverridablePageIconLayout.newFailedRequestCache();
+
     private boolean mHasResumed;
 
     @Override
@@ -358,6 +366,8 @@ public class BrowserApp extends GeckoApp
             view = BrowserToolbar.create(context, attrs);
         } else if (TabsPanel.TabsLayout.class.getName().equals(name)) {
             view = TabsPanel.createTabsLayout(context, attrs);
+        } else if (StreamOverridablePageIconLayout.class.getName().equals(name)) {
+            view = new StreamOverridablePageIconLayout(context, attrs, mStreamIconLayoutFailedRequestCache);
         } else {
             view = super.onCreateView(name, context, attrs);
         }
@@ -1640,14 +1650,6 @@ public class BrowserApp extends GeckoApp
 
         deleteTempFiles(getApplicationContext());
 
-        if (mDoorHangerPopup != null) {
-            mDoorHangerPopup.destroy();
-            mDoorHangerPopup = null;
-        }
-        if (mFormAssistPopup != null)
-            mFormAssistPopup.destroy();
-        if (mTextSelection != null)
-            mTextSelection.destroy();
         NotificationHelper.destroy();
         GeckoNetworkManager.destroy();
 
@@ -2318,8 +2320,8 @@ public class BrowserApp extends GeckoApp
             }
         }
 
-        // Since tabs tray only has dark theme, always update the status bar with dark color.
-        WindowUtil.invalidateStatusBarColor(this, true);
+        // Set status bar color with tabs tray background color.
+        WindowUtil.setTabsTrayStatusBarColor(this);
     }
 
     @Override
@@ -2336,9 +2338,8 @@ public class BrowserApp extends GeckoApp
             delegate.onTabsTrayHidden(this, mTabsPanel);
         }
 
-        final Tab tab = Tabs.getInstance().getSelectedTab();
-        final boolean darkTheme = (tab != null && tab.isPrivate());
-        WindowUtil.invalidateStatusBarColor(this, darkTheme);
+        final boolean isPrivate = mBrowserToolbar.isPrivateMode();
+        WindowUtil.setStatusBarColor(this, isPrivate);
     }
 
     @Override
@@ -3738,6 +3739,14 @@ public class BrowserApp extends GeckoApp
 
         if (SwitchBoard.isInExperiment(this, Experiments.TOP_ADDONS_MENU)) {
             MenuUtils.safeSetVisible(aMenu, R.id.addons_top_level, true);
+            GeckoMenuItem item = (GeckoMenuItem) aMenu.findItem(R.id.addons_top_level);
+            if (item != null) {
+                if (mExtensionPermissionsHelper.getShowUpdateIcon()) {
+                    item.setIcon(R.drawable.ic_addon_update);
+                } else {
+                    item.setIcon(null);
+                }
+            }
             MenuUtils.safeSetVisible(aMenu, R.id.addons, false);
         } else {
             MenuUtils.safeSetVisible(aMenu, R.id.addons_top_level, false);

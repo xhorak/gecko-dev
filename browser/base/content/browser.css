@@ -184,8 +184,15 @@ tabbrowser {
   transition: transform 200ms var(--animation-easing-function);
 }
 
+/* The next 3 rules allow dragging tabs slightly outside of the tabstrip
+ * to make it easier to drag tabs. */
+#TabsToolbar[movingtab] {
+  padding-bottom: 15px;
+}
+
 #TabsToolbar[movingtab] > .tabbrowser-tabs {
   padding-bottom: 15px;
+  margin-bottom: -15px;
 }
 
 #TabsToolbar[movingtab] + #nav-bar {
@@ -455,9 +462,12 @@ toolbarpaletteitem[place="palette"] > #personal-bookmarks > #bookmarks-toolbar-b
   display: -moz-box;
 }
 
+#personal-bookmarks {
+  position: relative;
+}
+
 #PlacesToolbarDropIndicatorHolder {
   position: absolute;
-  top: 25%;
 }
 
 #nav-bar-customization-target > #personal-bookmarks,
@@ -483,6 +493,11 @@ toolbar:not(#TabsToolbar) > #personal-bookmarks {
   opacity: 1 !important;
 }
 
+/* Ensure stop-button and reload-button are displayed correctly when in the overflow menu */
+.widget-overflow-list > #stop-reload-button > .toolbarbutton-1 {
+  -moz-box-flex: 1;
+}
+
 #PanelUI-feeds > .feed-toolbarbutton:-moz-locale-dir(rtl) {
   direction: rtl;
 }
@@ -490,6 +505,7 @@ toolbar:not(#TabsToolbar) > #personal-bookmarks {
 #appMenu_historyMenu > .bookmark-item,
 #appMenu-library-recentlyClosedTabs > .panel-subview-body > .bookmark-item,
 #appMenu-library-recentlyClosedWindows > .panel-subview-body > .bookmark-item,
+#appMenu-library-recentHighlights > .bookmark-item,
 #panelMenu_bookmarksMenu > .bookmark-item {
   max-width: none;
 }
@@ -540,6 +556,19 @@ toolbar:not(#TabsToolbar) > #personal-bookmarks {
 
 #urlbar {
   -moz-binding: url(chrome://browser/content/urlbarBindings.xml#urlbar);
+}
+
+/* Display URLs left-to-right but right aligned in RTL mode. */
+html|input.urlbar-input:-moz-locale-dir(rtl) {
+  direction: ltr !important;
+  text-align: right !important;
+}
+
+/* Make sure that the location bar's alignment in RTL mode changes according
+   to the input box direction if the user switches the text direction using
+   cmd_switchTextDirection (which applies a dir attribute to the <input>). */
+html|input.urlbar-input[dir=ltr]:-moz-locale-dir(rtl) {
+  text-align: left !important;
 }
 
 /*
