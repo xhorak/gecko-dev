@@ -487,6 +487,7 @@ nsWindow::nsWindow()
     mPendingConfigures = 0;
     mDrawWindowDecoration = false;
     mDecorationSize = {0,0,0,0};
+    mCSDSupportLevel = CSD_SUPPORT_UNKNOWN;
 }
 
 nsWindow::~nsWindow()
@@ -3729,7 +3730,8 @@ nsWindow::Create(nsIWidget* aParent,
 #if (MOZ_WIDGET_GTK == 3)
         // When CSD is available we can emulate it for toplevel windows.
         // Content is rendered to mContainer and transparent decorations to mShell.
-        if (mWindowType == eWindowType_toplevel) {
+        if (GetCSDSupportLevel() != CSD_SUPPORT_NONE &&
+                mWindowType == eWindowType_toplevel) {
             int32_t isCSDAvailable = false;
             nsresult rv = LookAndFeel::GetInt(LookAndFeel::eIntID_GTKCSDAvailable,
                                              &isCSDAvailable);
@@ -7054,10 +7056,43 @@ nsWindow::GetClientResizerSize()
   return GdkCoordToDevicePixels(size);
 }
 
+nsWindow::CSDSupportLevel
+nsWindow::GetCSDSupportLevel() {
+    if (mCSDSupportLevel != CSD_SUPPORT_UNKNOWN) {
+        return mCSDSupportLevel;
+    }
+    // TODO: MATE
+    const char* currentDesktop = getenv("XDG_CURRENT_DESKTOP");
+    if (currentDesktop) {
+        if (strcmp(currentDesktop, "GNOME") == 0) {
+            mCSDSupportLevel = CSD_SUPPORT_FULL;
+        } else if (strcmp(currentDesktop, "XFCE") == 0) {
+            mCSDSupportLevel = CSD_SUPPORT_FULL;
+        } else if (strcmp(currentDesktop, "X-Cinnamon") == 0) {
+            mCSDSupportLevel = CSD_SUPPORT_FULL;
+        } else if (strcmp(currentDesktop, "KDE") == 0) {
+            mCSDSupportLevel = CSD_SUPPORT_FLAT;
+        } else if (strcmp(currentDesktop, "LXDE") == 0) {
+            mCSDSupportLevel = CSD_SUPPORT_FLAT;
+        } else if (strcmp(currentDesktop, "openbox") == 0) {
+            mCSDSupportLevel = CSD_SUPPORT_FLAT;
+        } else if (strcmp(currentDesktop, "i3") == 0) {
+            mCSDSupportLevel = CSD_SUPPORT_NONE;
+        } else {
+            mCSDSupportLevel = CSD_SUPPORT_NONE;
+        }
+    }
+    return mCSDSupportLevel;
+}
+
 void
 nsWindow::UpdateClientDecorations()
 {
-  if (!mDrawWindowDecoration)
+  // When the CSD is not fully supported by window manager (ie. WM is not
+  // expecting that application is going to draw window shadows) we can't
+  // add shadows widths to the window margin. That would lead to completely
+  // opaque black border of the window.
+  if (!mDrawWindowDecoration || GetCSDSupportLevel() != CSD_SUPPORT_FULL)
       return;
 
   gint top = 0, right = 0, bottom = 0, left = 0;
