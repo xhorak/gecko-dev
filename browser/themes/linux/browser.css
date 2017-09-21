@@ -22,6 +22,7 @@
 
   --toolbarbutton-border-radius: 4px;
   --toolbarbutton-vertical-text-padding: calc(var(--toolbarbutton-inner-padding) - 1px);
+  --toolbarbutton-icon-fill-opacity: .85;
 
   --panel-separator-color: ThreeDShadow;
   --arrowpanel-dimmed: hsla(0,0%,80%,.3);
@@ -57,6 +58,7 @@
 #navigator-toolbox > toolbar:not(#toolbar-menubar):not(#TabsToolbar) {
   background-color: var(--toolbar-bgcolor);
   background-image: var(--toolbar-bgimage);
+  color: var(--toolbar-color, inherit);
   -moz-appearance: none;
   border-style: none;
 }
@@ -295,16 +297,6 @@ menuitem.bookmark-item {
 }
 
 /* identity box */
-
-#identity-box:-moz-locale-dir(ltr) {
-  border-top-left-radius: 1.5px;
-  border-bottom-left-radius: 1.5px;
-}
-
-#identity-box:-moz-locale-dir(rtl) {
-  border-top-right-radius: 1.5px;
-  border-bottom-right-radius: 1.5px;
-}
 
 #identity-box:not(:active):-moz-focusring {
   outline: 1px dotted;
@@ -830,20 +822,46 @@ html|span.ac-emphasize-text-url {
 
   /* titlebar command buttons */
   /* Use full scale icons here as the Gtk+ does. */
-  #titlebar-min {
-    list-style-image: url("moz-icon://stock/window-minimize-symbolic");
-    -moz-appearance: -moz-window-button-minimize;
+  @media (-moz-gtk-csd-minimize-button) {
+    #titlebar-min {
+      list-style-image: url("moz-icon://stock/window-minimize-symbolic");
+      -moz-appearance: -moz-window-button-minimize;
+    }
   }
-  #titlebar-max {
-    list-style-image: url("moz-icon://stock/window-maximize-symbolic");
-    -moz-appearance: -moz-window-button-maximize;
+  @media not all and (-moz-gtk-csd-minimize-button) {
+    #titlebar-min {
+      display: none;
+    }
   }
-  #main-window[sizemode="maximized"] #titlebar-max {
-    list-style-image: url("moz-icon://stock/window-restore-symbolic");
-    -moz-appearance: -moz-window-button-restore;
+
+  @media (-moz-gtk-csd-maximize-button) {
+    #titlebar-max {
+      list-style-image: url("moz-icon://stock/window-maximize-symbolic");
+      -moz-appearance: -moz-window-button-maximize;
+    }
+    #main-window[sizemode="maximized"] #titlebar-max {
+      list-style-image: url("moz-icon://stock/window-restore-symbolic");
+      -moz-appearance: -moz-window-button-restore;
+    }
   }
-  #titlebar-close {
-    list-style-image: url("moz-icon://stock/window-close-symbolic");
-    -moz-appearance: -moz-window-button-close;
+  @media not all and (-moz-gtk-csd-maximize-button) {
+    #titlebar-max {
+      display: none;
+    }
+    #main-window[sizemode="maximized"] #titlebar-max {
+      display: none;
+    }
+  }
+
+  @media (-moz-gtk-csd-close-button) {
+    #titlebar-close {
+      list-style-image: url("moz-icon://stock/window-close-symbolic");
+      -moz-appearance: -moz-window-button-close;
+    }
+  }
+  @media not all and (-moz-gtk-csd-close-button) {
+    #titlebar-close {
+      display: none;
+    }
   }
 }

@@ -809,25 +809,6 @@ var gPrivacyPane = {
     settingsButton.disabled = !sanitizeOnShutdownPref.value;
   },
 
-  // CONTAINERS
-
-  /*
-   * preferences:
-   *
-   * privacy.userContext.enabled
-   * - true if containers is enabled
-   */
-
-  /**
-   * Enables/disables the Settings button used to configure containers
-   */
-  readBrowserContainersCheckbox() {
-    var pref = document.getElementById("privacy.userContext.enabled");
-    var settings = document.getElementById("browserContainersSettings");
-
-    settings.disabled = !pref.value;
-  },
-
   toggleDoNotDisturbNotifications(event) {
     AlertsServiceDND.manualDoNotDisturb = event.target.checked;
   },
@@ -1089,6 +1070,10 @@ var gPrivacyPane = {
 
     let blockUnwantedPref = document.getElementById("browser.safebrowsing.downloads.remote.block_potentially_unwanted");
     let blockUncommonPref = document.getElementById("browser.safebrowsing.downloads.remote.block_uncommon");
+
+    let learnMoreLink = document.getElementById("enableSafeBrowsingLearnMore");
+    let phishingUrl = "https://support.mozilla.org/kb/how-does-phishing-and-malware-protection-work";
+    learnMoreLink.setAttribute("href", phishingUrl);
 
     enableSafeBrowsing.addEventListener("command", function() {
       safeBrowsingPhishingPref.value = enableSafeBrowsing.checked;

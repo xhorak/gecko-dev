@@ -80,6 +80,9 @@ protected:
     float   sCaretRatio;
     bool    sMenuSupportsDrag;
     bool    sCSDAvailable;
+    bool    sCSDMaximizeButton;
+    bool    sCSDMinimizeButton;
+    bool    sCSDCloseButton;
     bool    mInitialized;
 
     void EnsureInit();
