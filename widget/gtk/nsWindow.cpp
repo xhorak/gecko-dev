@@ -1136,8 +1136,8 @@ nsWindow::Resize(double aWidth, double aHeight, bool aRepaint)
 
     // When we draw decorations add extra space to draw shadows around the main window.
     if (mDrawWindowDecoration) {
-      width += mDecorationSize.left + mDecorationSize.right;
-      height += mDecorationSize.top + mDecorationSize.bottom;
+        width += mDecorationSize.left + mDecorationSize.right;
+        height += mDecorationSize.top + mDecorationSize.bottom;
     }
 
     mBounds.SizeTo(width, height);
