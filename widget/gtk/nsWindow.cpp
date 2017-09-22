@@ -1134,12 +1134,6 @@ nsWindow::Resize(double aWidth, double aHeight, bool aRepaint)
     // interpreted as frame bounds, but NativeResize treats these as window
     // bounds (Bug 581866).
 
-    // When we draw decorations add extra space to draw shadows around the main window.
-    if (mDrawWindowDecoration) {
-        width += mDecorationSize.left + mDecorationSize.right;
-        height += mDecorationSize.top + mDecorationSize.bottom;
-    }
-
     mBounds.SizeTo(width, height);
 
     if (!mCreated)
@@ -4254,6 +4248,12 @@ nsWindow::NativeResize()
          size.width, size.height));
 
     if (mIsTopLevel) {
+        // When we draw decorations add extra space to draw shadows
+        // around the main window.
+        if (mDrawWindowDecoration) {
+            size.width += mDecorationSize.left + mDecorationSize.right;
+            size.height += mDecorationSize.top + mDecorationSize.bottom;
+        }
         gtk_window_resize(GTK_WINDOW(mShell), size.width, size.height);
     }
     else if (mContainer) {
@@ -4310,6 +4310,11 @@ nsWindow::NativeMoveResize()
     if (mIsTopLevel) {
         // x and y give the position of the window manager frame top-left.
         gtk_window_move(GTK_WINDOW(mShell), topLeft.x, topLeft.y);
+
+        if (mDrawWindowDecoration) {
+            size.width += mDecorationSize.left + mDecorationSize.right;
+            size.height += mDecorationSize.top + mDecorationSize.bottom;
+        }
         // This sets the client window size.
         gtk_window_resize(GTK_WINDOW(mShell), size.width, size.height);
     }
