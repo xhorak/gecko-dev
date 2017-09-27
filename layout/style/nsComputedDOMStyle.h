@@ -346,7 +346,6 @@ private:
 
   /* Mask properties */
   already_AddRefed<CSSValue> DoGetMask();
-#ifdef MOZ_ENABLE_MASK_AS_SHORTHAND
   already_AddRefed<CSSValue> DoGetMaskImage();
   already_AddRefed<CSSValue> DoGetMaskPosition();
   already_AddRefed<CSSValue> DoGetMaskPositionX();
@@ -357,7 +356,7 @@ private:
   already_AddRefed<CSSValue> DoGetMaskSize();
   already_AddRefed<CSSValue> DoGetMaskMode();
   already_AddRefed<CSSValue> DoGetMaskComposite();
-#endif
+
   /* Padding properties */
   already_AddRefed<CSSValue> DoGetPaddingTop();
   already_AddRefed<CSSValue> DoGetPaddingBottom();
@@ -715,6 +714,10 @@ private:
                          const nsTArray<nsStyleCoord>& aBoxValues);
   void BasicShapeRadiiToString(nsAString& aCssText,
                                const nsStyleCorners& aCorners);
+
+  // Find out if we can safely skip flushing for aDocument (i.e. pending
+  // restyles does not affect mContent).
+  mozilla::FlushTarget GetFlushTarget(nsIDocument* aDocument) const;
 
 
   static nsComputedStyleMap* GetComputedStyleMap();

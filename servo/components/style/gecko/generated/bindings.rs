@@ -17,7 +17,6 @@ use gecko_bindings::structs::mozilla::css::URLValueData;
 use gecko_bindings::structs::mozilla::AnonymousCounterStyle;
 use gecko_bindings::structs::mozilla::MallocSizeOf;
 use gecko_bindings::structs::mozilla::OriginFlags;
-use gecko_bindings::structs::mozilla::Side;
 use gecko_bindings::structs::mozilla::UniquePtr;
 use gecko_bindings::structs::ServoRawOffsetArc;
 use gecko_bindings::structs::nsIContent;
@@ -71,7 +70,6 @@ use gecko_bindings::structs::StyleBasicShapeType;
 use gecko_bindings::structs::StyleShapeSource;
 use gecko_bindings::structs::StyleTransition;
 use gecko_bindings::structs::gfxFontFeatureValueSet;
-use gecko_bindings::structs::nsBorderColors;
 use gecko_bindings::structs::nsCSSCounterStyleRule;
 use gecko_bindings::structs::nsCSSFontFaceRule;
 use gecko_bindings::structs::nsCSSKeyword;
@@ -875,22 +873,6 @@ extern "C" {
 }
 extern "C" {
     pub fn Gecko_EnsureMozBorderColors(aBorder: *mut nsStyleBorder);
-}
-extern "C" {
-    pub fn Gecko_ClearMozBorderColors(aBorder: *mut nsStyleBorder,
-                                      aSide: Side);
-}
-extern "C" {
-    pub fn Gecko_AppendMozBorderColors(aBorder: *mut nsStyleBorder,
-                                       aSide: Side, aColor: nscolor);
-}
-extern "C" {
-    pub fn Gecko_CopyMozBorderColors(aDest: *mut nsStyleBorder,
-                                     aSrc: *const nsStyleBorder, aSide: Side);
-}
-extern "C" {
-    pub fn Gecko_GetMozBorderColors(aBorder: *const nsStyleBorder,
-                                    aSide: Side) -> *const nsBorderColors;
 }
 extern "C" {
     pub fn Gecko_FontFamilyList_Clear(aList: *mut FontFamilyList);
@@ -1937,6 +1919,11 @@ extern "C" {
      -> bool;
 }
 extern "C" {
+    pub fn Servo_Element_IsPrimaryStyleReusedViaRuleNode(element:
+                                                             RawGeckoElementBorrowed)
+     -> bool;
+}
+extern "C" {
     pub fn Servo_StyleSheet_FromUTF8Bytes(loader: *mut Loader,
                                           gecko_stylesheet:
                                               *mut ServoStyleSheet,
@@ -1983,7 +1970,8 @@ extern "C" {
                                             result: *mut nsAString);
 }
 extern "C" {
-    pub fn Servo_StyleSheet_GetSourceURL(sheet: RawServoStyleSheetContentsBorrowed,
+    pub fn Servo_StyleSheet_GetSourceURL(sheet:
+                                             RawServoStyleSheetContentsBorrowed,
                                          result: *mut nsAString);
 }
 extern "C" {
@@ -2088,6 +2076,11 @@ extern "C" {
                                                      *mut ServoStyleSetSizes,
                                                  set:
                                                      RawServoStyleSetBorrowed);
+}
+extern "C" {
+    pub fn Servo_UACache_AddSizeOf(malloc_size_of: MallocSizeOf,
+                                   malloc_enclosing_size_of: MallocSizeOf,
+                                   sizes: *mut ServoStyleSetSizes);
 }
 extern "C" {
     pub fn Servo_StyleContext_AddRef(ctx: ServoStyleContextBorrowed);
@@ -2862,6 +2855,9 @@ extern "C" {
     pub fn Servo_Initialize(dummy_url_data: *mut RawGeckoURLExtraData);
 }
 extern "C" {
+    pub fn Servo_InitializeCooperativeThread();
+}
+extern "C" {
     pub fn Servo_Shutdown();
 }
 extern "C" {
@@ -2978,6 +2974,19 @@ extern "C" {
 extern "C" {
     pub fn Servo_HasPendingRestyleAncestor(element: RawGeckoElementBorrowed)
      -> bool;
+}
+extern "C" {
+    pub fn Servo_GetArcStringData(arg1: *const RustString,
+                                  chars: *mut *const u8, len: *mut u32);
+}
+extern "C" {
+    pub fn Servo_ReleaseArcStringData(string:
+                                          *const ServoRawOffsetArc<RustString>);
+}
+extern "C" {
+    pub fn Servo_CloneArcStringData(string:
+                                        *const ServoRawOffsetArc<RustString>)
+     -> ServoRawOffsetArc<RustString>;
 }
 extern "C" {
     pub fn Gecko_CreateCSSErrorReporter(sheet: *mut ServoStyleSheet,

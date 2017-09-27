@@ -124,6 +124,7 @@
 #include "DisplayItemClip.h"
 #include "mozilla/layers/WebRenderLayerManager.h"
 #include "prenv.h"
+#include "TextDrawTarget.h"
 
 #ifdef MOZ_XUL
 #include "nsXULPopupManager.h"
@@ -2708,22 +2709,46 @@ nsLayoutUtils::PostTranslate(Matrix4x4& aTransform, const nsPoint& aOrigin, floa
   aTransform.PostTranslate(gfxOrigin);
 }
 
+// We want to this return true for the scroll frame, but not the
+// scrolled frame (which has the same content).
+bool
+nsLayoutUtils::FrameHasDisplayPort(nsIFrame* aFrame, nsIFrame* aScrolledFrame)
+{
+  if (!aFrame->GetContent() || !HasDisplayPort(aFrame->GetContent())) {
+    return false;
+  }
+  nsIScrollableFrame* sf = do_QueryFrame(aFrame);
+  if (sf) {
+    if (aScrolledFrame && aScrolledFrame != sf->GetScrolledFrame()) {
+      return false;
+    }
+    return true;
+  }
+  return false;
+}
+
 Matrix4x4
 nsLayoutUtils::GetTransformToAncestor(nsIFrame *aFrame,
                                       const nsIFrame *aAncestor,
-                                      bool aInCSSUnits)
+                                      uint32_t aFlags,
+                                      nsIFrame** aOutAncestor)
 {
   nsIFrame* parent;
   Matrix4x4 ctm;
   if (aFrame == aAncestor) {
     return ctm;
   }
-  ctm = aFrame->GetTransformMatrix(aAncestor, &parent, aInCSSUnits);
-  while (parent && parent != aAncestor) {
+  ctm = aFrame->GetTransformMatrix(aAncestor, &parent, aFlags);
+  while (parent && parent != aAncestor &&
+    (!(aFlags & nsIFrame::STOP_AT_STACKING_CONTEXT_AND_DISPLAY_PORT) ||
+      (!parent->IsStackingContext() && !FrameHasDisplayPort(parent)))) {
     if (!parent->Extend3DContext()) {
       ctm.ProjectTo2D();
     }
-    ctm = ctm * parent->GetTransformMatrix(aAncestor, &parent, aInCSSUnits);
+    ctm = ctm * parent->GetTransformMatrix(aAncestor, &parent, aFlags);
+  }
+  if (aOutAncestor) {
+    *aOutAncestor = parent;
   }
   return ctm;
 }
@@ -3028,7 +3053,9 @@ TransformGfxRectToAncestor(nsIFrame *aFrame,
                            const Rect &aRect,
                            const nsIFrame *aAncestor,
                            bool* aPreservesAxisAlignedRectangles = nullptr,
-                           Maybe<Matrix4x4>* aMatrixCache = nullptr)
+                           Maybe<Matrix4x4>* aMatrixCache = nullptr,
+                           bool aStopAtStackingContextAndDisplayPort = false,
+                           nsIFrame** aOutAncestor = nullptr)
 {
   Matrix4x4 ctm;
   if (aMatrixCache && *aMatrixCache) {
@@ -3036,7 +3063,11 @@ TransformGfxRectToAncestor(nsIFrame *aFrame,
     ctm = aMatrixCache->value();
   } else {
     // Else, compute it
-    ctm = nsLayoutUtils::GetTransformToAncestor(aFrame, aAncestor);
+    uint32_t flags = 0;
+    if (aStopAtStackingContextAndDisplayPort) {
+      flags |= nsIFrame::STOP_AT_STACKING_CONTEXT_AND_DISPLAY_PORT;
+    }
+    ctm = nsLayoutUtils::GetTransformToAncestor(aFrame, aAncestor, flags, aOutAncestor);
     if (aMatrixCache) {
       // and put it in the cache, if provided
       *aMatrixCache = Some(ctm);
@@ -3097,7 +3128,9 @@ nsLayoutUtils::TransformFrameRectToAncestor(nsIFrame* aFrame,
                                             const nsRect& aRect,
                                             const nsIFrame* aAncestor,
                                             bool* aPreservesAxisAlignedRectangles /* = nullptr */,
-                                            Maybe<Matrix4x4>* aMatrixCache /* = nullptr */)
+                                            Maybe<Matrix4x4>* aMatrixCache /* = nullptr */,
+                                            bool aStopAtStackingContextAndDisplayPort /* = false */,
+                                            nsIFrame** aOutAncestor /* = nullptr */)
 {
   SVGTextFrame* text = GetContainingSVGTextFrame(aFrame);
 
@@ -3106,7 +3139,9 @@ nsLayoutUtils::TransformFrameRectToAncestor(nsIFrame* aFrame,
 
   if (text) {
     result = ToRect(text->TransformFrameRectFromTextChild(aRect, aFrame));
-    result = TransformGfxRectToAncestor(text, result, aAncestor, nullptr, aMatrixCache);
+    result = TransformGfxRectToAncestor(text, result, aAncestor,
+                                        nullptr, aMatrixCache,
+                                        aStopAtStackingContextAndDisplayPort, aOutAncestor);
     // TransformFrameRectFromTextChild could involve any kind of transform, we
     // could drill down into it to get an answer out of it but we don't yet.
     if (aPreservesAxisAlignedRectangles)
@@ -3116,7 +3151,9 @@ nsLayoutUtils::TransformFrameRectToAncestor(nsIFrame* aFrame,
                   NSAppUnitsToFloatPixels(aRect.y, srcAppUnitsPerDevPixel),
                   NSAppUnitsToFloatPixels(aRect.width, srcAppUnitsPerDevPixel),
                   NSAppUnitsToFloatPixels(aRect.height, srcAppUnitsPerDevPixel));
-    result = TransformGfxRectToAncestor(aFrame, result, aAncestor, aPreservesAxisAlignedRectangles, aMatrixCache);
+    result = TransformGfxRectToAncestor(aFrame, result, aAncestor,
+                                        aPreservesAxisAlignedRectangles, aMatrixCache,
+                                        aStopAtStackingContextAndDisplayPort, aOutAncestor);
   }
 
   float destAppUnitsPerDevPixel = aAncestor->PresContext()->AppUnitsPerDevPixel();
@@ -3491,6 +3528,46 @@ nsLayoutUtils::ExpireDisplayPortOnAsyncScrollableAncestor(nsIFrame* aFrame)
   }
 }
 
+void
+nsLayoutUtils::AddExtraBackgroundItems(nsDisplayListBuilder& aBuilder,
+                                       nsDisplayList& aList,
+                                       nsIFrame* aFrame,
+                                       const nsRect& aCanvasArea,
+                                       const nsRegion& aVisibleRegion,
+                                       nscolor aBackstop)
+{
+  LayoutFrameType frameType = aFrame->Type();
+  nsPresContext* presContext = aFrame->PresContext();
+  nsIPresShell* presShell = presContext->PresShell();
+
+  // For the viewport frame in print preview/page layout we want to paint
+  // the grey background behind the page, not the canvas color.
+  if (frameType == LayoutFrameType::Viewport &&
+      nsLayoutUtils::NeedsPrintPreviewBackground(presContext)) {
+    nsRect bounds = nsRect(aBuilder.ToReferenceFrame(aFrame),
+                           aFrame->GetSize());
+    nsDisplayListBuilder::AutoBuildingDisplayList
+      buildingDisplayList(&aBuilder, aFrame, bounds, false);
+    presShell->AddPrintPreviewBackgroundItem(aBuilder, aList, aFrame, bounds);
+  } else if (frameType != LayoutFrameType::Page) {
+    // For printing, this function is first called on an nsPageFrame, which
+    // creates a display list with a PageContent item. The PageContent item's
+    // paint function calls this function on the nsPageFrame's child which is
+    // an nsPageContentFrame. We only want to add the canvas background color
+    // item once, for the nsPageContentFrame.
+
+    // Add the canvas background color to the bottom of the list. This
+    // happens after we've built the list so that AddCanvasBackgroundColorItem
+    // can monkey with the contents if necessary.
+    nsRect canvasArea = aVisibleRegion.GetBounds();
+    canvasArea.IntersectRect(aCanvasArea, canvasArea);
+    nsDisplayListBuilder::AutoBuildingDisplayList
+      buildingDisplayList(&aBuilder, aFrame, canvasArea, false);
+    presShell->AddCanvasBackgroundColorItem(
+      aBuilder, aList, aFrame, canvasArea, aBackstop);
+  }
+}
+
 nsresult
 nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
                           const nsRegion& aDirtyRegion, nscolor aBackstop,
@@ -3649,33 +3726,7 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
       aFrame->BuildDisplayListForStackingContext(&builder, &list);
     }
 
-    LayoutFrameType frameType = aFrame->Type();
-
-    // For the viewport frame in print preview/page layout we want to paint
-    // the grey background behind the page, not the canvas color.
-    if (frameType == LayoutFrameType::Viewport &&
-        nsLayoutUtils::NeedsPrintPreviewBackground(presContext)) {
-      nsRect bounds = nsRect(builder.ToReferenceFrame(aFrame),
-                             aFrame->GetSize());
-      nsDisplayListBuilder::AutoBuildingDisplayList
-        buildingDisplayList(&builder, aFrame, bounds, false);
-      presShell->AddPrintPreviewBackgroundItem(builder, list, aFrame, bounds);
-    } else if (frameType != LayoutFrameType::Page) {
-      // For printing, this function is first called on an nsPageFrame, which
-      // creates a display list with a PageContent item. The PageContent item's
-      // paint function calls this function on the nsPageFrame's child which is
-      // an nsPageContentFrame. We only want to add the canvas background color
-      // item once, for the nsPageContentFrame.
-
-      // Add the canvas background color to the bottom of the list. This
-      // happens after we've built the list so that AddCanvasBackgroundColorItem
-      // can monkey with the contents if necessary.
-      canvasArea.IntersectRect(canvasArea, visibleRegion.GetBounds());
-      nsDisplayListBuilder::AutoBuildingDisplayList
-        buildingDisplayList(&builder, aFrame, canvasArea, false);
-      presShell->AddCanvasBackgroundColorItem(
-             builder, list, aFrame, canvasArea, aBackstop);
-    }
+    AddExtraBackgroundItems(builder, list, aFrame, canvasArea, visibleRegion, aBackstop);
 
     builder.LeavePresShell(aFrame, &list);
 
@@ -6067,6 +6118,29 @@ nsLayoutUtils::PaintTextShadow(const nsIFrame* aFrame,
 
     nsPresContext* presCtx = aFrame->PresContext();
     nsContextBoxBlur contextBoxBlur;
+
+    nscolor shadowColor;
+    if (shadowDetails->mHasColor)
+      shadowColor = shadowDetails->mColor;
+    else
+      shadowColor = aForegroundColor;
+
+    // Webrender just needs the shadow details
+    if (auto* textDrawer = aContext->GetTextDrawer()) {
+      wr::TextShadow wrShadow;
+
+      wrShadow.offset = {
+        presCtx->AppUnitsToFloatDevPixels(shadowDetails->mXOffset),
+        presCtx->AppUnitsToFloatDevPixels(shadowDetails->mYOffset)
+      };
+
+      wrShadow.blur_radius = presCtx->AppUnitsToFloatDevPixels(shadowDetails->mRadius);
+      wrShadow.color = wr::ToColorF(ToDeviceColor(shadowColor));
+
+      textDrawer->AppendShadow(wrShadow);
+      return;
+    }
+
     gfxContext* shadowContext = contextBoxBlur.Init(shadowRect, 0, blurRadius,
                                                     presCtx->AppUnitsPerDevPixel(),
                                                     aDestCtx, aDirtyRect, nullptr,
@@ -6074,11 +6148,7 @@ nsLayoutUtils::PaintTextShadow(const nsIFrame* aFrame,
     if (!shadowContext)
       continue;
 
-    nscolor shadowColor;
-    if (shadowDetails->mHasColor)
-      shadowColor = shadowDetails->mColor;
-    else
-      shadowColor = aForegroundColor;
+    
 
     aDestCtx->Save();
     aDestCtx->NewPath();
@@ -6534,8 +6604,8 @@ ComputeSnappedImageDrawingParameters(gfxContext*     aCtx,
   // and has integer coordinates. If not, we need these properties to compute
   // the optimal drawn image size, so compute |snappedDestSize| here.
   gfxSize snappedDestSize = dest.Size();
+  gfxSize scaleFactors = currentMatrix.ScaleFactors(true);
   if (!didSnap) {
-    gfxSize scaleFactors = currentMatrix.ScaleFactors(true);
     snappedDestSize.Scale(scaleFactors.width, scaleFactors.height);
     snappedDestSize.width = NS_round(snappedDestSize.width);
     snappedDestSize.height = NS_round(snappedDestSize.height);
@@ -6547,7 +6617,7 @@ ComputeSnappedImageDrawingParameters(gfxContext*     aCtx,
   snappedDestSize.height = std::max(snappedDestSize.height, 1.0);
 
   // Bail if we're not going to end up drawing anything.
-  if (fill.IsEmpty() || snappedDestSize.IsEmpty()) {
+  if (fill.IsEmpty()) {
     return SnappedImageDrawingParameters();
   }
 
@@ -6555,12 +6625,24 @@ ComputeSnappedImageDrawingParameters(gfxContext*     aCtx,
     aImage->OptimalImageSizeForDest(snappedDestSize,
                                     imgIContainer::FRAME_CURRENT,
                                     aSamplingFilter, aImageFlags);
-  gfxSize imageSize(intImageSize.width, intImageSize.height);
 
-  // XXX(seth): May be buggy; see bug 1151016.
-  CSSIntSize svgViewportSize = currentMatrix.IsIdentity()
-    ? CSSIntSize(intImageSize.width, intImageSize.height)
-    : CSSIntSize::Truncate(devPixelDest.width, devPixelDest.height);
+  nsIntSize svgViewportSize;
+  if (scaleFactors.width == 1.0 && scaleFactors.height == 1.0) {
+    // intImageSize is scaled by currentMatrix. But since there are no scale
+    // factors in currentMatrix, it is safe to assign intImageSize to
+    // svgViewportSize directly.
+    svgViewportSize = intImageSize;
+  } else {
+    // We should not take into account any transformation of currentMatrix
+    // when computing svg viewport size. Since currentMatrix contains scale
+    // factors, we need to recompute SVG viewport by unscaled devPixelDest.
+    svgViewportSize = aImage->OptimalImageSizeForDest(devPixelDest.Size(),
+                                                      imgIContainer::FRAME_CURRENT,
+                                                      aSamplingFilter,
+                                                      aImageFlags);
+  }
+
+  gfxSize imageSize(intImageSize.width, intImageSize.height);
 
   // Compute the set of pixels that would be sampled by an ideal rendering
   gfxPoint subimageTopLeft =
@@ -6677,7 +6759,9 @@ ComputeSnappedImageDrawingParameters(gfxContext*     aCtx,
     ImageRegion::CreateWithSamplingRestriction(imageSpaceFill, subimage, extendMode);
 
   return SnappedImageDrawingParameters(transform, intImageSize,
-                                       region, svgViewportSize);
+                                       region,
+                                       CSSIntSize(svgViewportSize.width,
+                                                  svgViewportSize.height));
 }
 
 static DrawResult
@@ -6721,9 +6805,7 @@ DrawImageInternal(gfxContext&            aContext,
   {
     gfxContextMatrixAutoSaveRestore contextMatrixRestorer(&aContext);
 
-    RefPtr<gfxContext> destCtx = &aContext;
-
-    destCtx->SetMatrix(params.imageSpaceToDeviceSpace);
+    aContext.SetMatrix(params.imageSpaceToDeviceSpace);
 
     Maybe<SVGImageContext> fallbackContext;
     if (!aSVGContext) {
@@ -6731,7 +6813,7 @@ DrawImageInternal(gfxContext&            aContext,
       fallbackContext.emplace(Some(params.svgViewportSize));
     }
 
-    result = aImage->Draw(destCtx, params.size, params.region,
+    result = aImage->Draw(&aContext, params.size, params.region,
                           imgIContainer::FRAME_CURRENT, aSamplingFilter,
                           aSVGContext ? aSVGContext : fallbackContext,
                           aImageFlags, aOpacity);

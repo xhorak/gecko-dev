@@ -4031,7 +4031,7 @@ static bool
 ShouldCollectZone(Zone* zone, JS::gcreason::Reason reason)
 {
     // If we are repeating a GC because we noticed dead compartments haven't
-    // been collected, then only collect zones contianing those compartments.
+    // been collected, then only collect zones containing those compartments.
     if (reason == JS::gcreason::COMPARTMENT_REVIVED) {
         for (CompartmentsInZoneIter comp(zone); !comp.done(); comp.next()) {
             if (comp->scheduledForDestruction)
@@ -4063,7 +4063,7 @@ ShouldCollectZone(Zone* zone, JS::gcreason::Reason reason)
     if (zone->isAtomsZone())
         return TlsContext.get()->canCollectAtoms();
 
-    return true;
+    return zone->canCollect();
 }
 
 bool
@@ -6706,9 +6706,8 @@ AutoGCSlice::AutoGCSlice(JSRuntime* rt)
         if (zone->isGCMarking()) {
             MOZ_ASSERT(zone->needsIncrementalBarrier());
             zone->setNeedsIncrementalBarrier(false);
-        } else {
-            MOZ_ASSERT(!zone->needsIncrementalBarrier());
         }
+        MOZ_ASSERT(!zone->needsIncrementalBarrier());
     }
 }
 
@@ -6716,11 +6715,10 @@ AutoGCSlice::~AutoGCSlice()
 {
     /* We can't use GCZonesIter if this is the end of the last slice. */
     for (ZonesIter zone(runtime, WithAtoms); !zone.done(); zone.next()) {
+        MOZ_ASSERT(!zone->needsIncrementalBarrier());
         if (zone->isGCMarking()) {
             zone->setNeedsIncrementalBarrier(true);
             zone->arenas.purge();
-        } else {
-            zone->setNeedsIncrementalBarrier(false);
         }
     }
 }
@@ -8083,13 +8081,19 @@ JS::AssertGCThingIsNotAnObjectSubclass(Cell* cell)
 JS_FRIEND_API(void)
 js::gc::AssertGCThingHasType(js::gc::Cell* cell, JS::TraceKind kind)
 {
-    MOZ_ASSERT(IsCellPointerValid(cell));
-    if (!cell)
+    if (!cell) {
         MOZ_ASSERT(kind == JS::TraceKind::Null);
-    else if (IsInsideNursery(cell))
+        return;
+    }
+
+    MOZ_ASSERT(IsCellPointerValid(cell));
+
+    if (IsInsideNursery(cell)) {
         MOZ_ASSERT(kind == JS::TraceKind::Object);
-    else
-        MOZ_ASSERT(MapAllocToTraceKind(cell->asTenured().getAllocKind()) == kind);
+        return;
+    }
+
+    MOZ_ASSERT(MapAllocToTraceKind(cell->asTenured().getAllocKind()) == kind);
 }
 #endif
 
@@ -8653,7 +8657,7 @@ NewMemoryInfoObject(JSContext* cx)
 #endif
         if (!JS_DefineProperty(cx, obj, pair.name,
                                getter, nullptr,
-                               JSPROP_ENUMERATE | JSPROP_SHARED))
+                               JSPROP_ENUMERATE))
         {
             return nullptr;
         }
@@ -8688,7 +8692,7 @@ NewMemoryInfoObject(JSContext* cx)
 #endif
         if (!JS_DefineProperty(cx, zoneObj, pair.name,
                                getter, nullptr,
-                               JSPROP_ENUMERATE | JSPROP_SHARED))
+                               JSPROP_ENUMERATE))
         {
             return nullptr;
         }

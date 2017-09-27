@@ -20,6 +20,8 @@ var {
   defineLazyGetter,
 } = ExtensionUtils;
 
+const READER_MODE_PREFIX = "about:reader";
+
 let tabTracker;
 let windowTracker;
 
@@ -228,6 +230,8 @@ class TabTracker extends TabTrackerBase {
     windowTracker.addOpenListener(this._handleWindowOpen);
     windowTracker.addCloseListener(this._handleWindowClose);
 
+    Services.mm.addMessageListener("Reader:UpdateReaderButton", this);
+
     /* eslint-disable mozilla/balanced-listeners */
     this.on("tab-detached", this._handleTabDestroyed);
     this.on("tab-removed", this._handleTabDestroyed);
@@ -358,6 +362,21 @@ class TabTracker extends TabTrackerBase {
         Promise.resolve().then(() => {
           this.emitActivated(nativeTab);
         });
+        break;
+    }
+  }
+
+  /**
+   * @param {Object} message
+   *        The message to handle.
+   * @private
+   */
+  receiveMessage(message) {
+    switch (message.name) {
+      case "Reader:UpdateReaderButton":
+        if (message.data && message.data.isArticle !== undefined) {
+          this.emit("tab-isarticle", message);
+        }
         break;
     }
   }
@@ -635,6 +654,14 @@ class Tab extends TabBase {
     return windowTracker.getId(this.window);
   }
 
+  get isArticle() {
+    return this.nativeTab.linkedBrowser.isArticle;
+  }
+
+  get isInReaderMode() {
+    return this.url && this.url.startsWith(READER_MODE_PREFIX);
+  }
+
   /**
    * Converts session store data to an object compatible with the return value
    * of the convert() method, representing that data.
@@ -665,7 +692,10 @@ class Tab extends TabBase {
 
     if (extension.tabManager.hasTabPermission(tabData)) {
       let entries = tabData.state ? tabData.state.entries : tabData.entries;
-      let entry = entries[entries.length - 1];
+      let lastTabIndex = tabData.state ? tabData.state.index : tabData.index;
+      // We need to take lastTabIndex - 1 because the index in the tab data is
+      // 1-based rather than 0-based.
+      let entry = entries[lastTabIndex - 1];
       result.url = entry.url;
       result.title = entry.title;
       if (tabData.image) {

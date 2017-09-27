@@ -1106,6 +1106,11 @@ Element::RemoveFromIdTable()
 already_AddRefed<ShadowRoot>
 Element::CreateShadowRoot(ErrorResult& aError)
 {
+  if (GetShadowRoot()) {
+    aError.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
+    return nullptr;
+  }
+
   nsAutoScriptBlocker scriptBlocker;
 
   RefPtr<mozilla::dom::NodeInfo> nodeInfo;
@@ -1142,24 +1147,7 @@ Element::CreateShadowRoot(ErrorResult& aError)
 
   shadowRoot->SetIsComposedDocParticipant(IsInComposedDoc());
 
-  // Replace the old ShadowRoot with the new one and let the old
-  // ShadowRoot know about the younger ShadowRoot because the old
-  // ShadowRoot is projected into the younger ShadowRoot's shadow
-  // insertion point (if it exists).
-  ShadowRoot* olderShadow = GetShadowRoot();
   SetShadowRoot(shadowRoot);
-  if (olderShadow) {
-    olderShadow->SetYoungerShadow(shadowRoot);
-
-    // Unbind children of older shadow root because they
-    // are no longer in the composed tree.
-    for (nsIContent* child = olderShadow->GetFirstChild(); child;
-         child = child->GetNextSibling()) {
-      child->UnbindFromTree(true, false);
-    }
-
-    olderShadow->SetIsComposedDocParticipant(false);
-  }
 
   // xblBinding takes ownership of docInfo.
   RefPtr<nsXBLBinding> xblBinding = new nsXBLBinding(shadowRoot, protoBinding);
@@ -1632,14 +1620,11 @@ Element::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
     SetSubtreeRootPointer(aParent->SubtreeRoot());
   }
 
-  nsIDocument* composedDoc = GetComposedDoc();
-  if (composedDoc) {
-    // Attached callback must be enqueued whenever custom element is inserted into a
-    // document and this document has a browsing context.
-    if (GetCustomElementData() && composedDoc->GetDocShell()) {
-      // Enqueue an attached callback for the custom element.
-      nsContentUtils::EnqueueLifecycleCallback(
-        composedDoc, nsIDocument::eAttached, this);
+  if (CustomElementRegistry::IsCustomElementEnabled() && IsInComposedDoc()) {
+    // Connected callback must be enqueued whenever a custom element becomes
+    // connected.
+    if (GetCustomElementData()) {
+      nsContentUtils::EnqueueLifecycleCallback(nsIDocument::eConnected, this);
     }
   }
 
@@ -1963,12 +1948,12 @@ Element::UnbindFromTree(bool aDeep, bool aNullParent)
 
     document->ClearBoxObjectFor(this);
 
-    // Detached must be enqueued whenever custom element is removed from
-    // the document and this document has a browsing context.
-    if (GetCustomElementData() && document->GetDocShell()) {
-      // Enqueue a detached callback for the custom element.
-      nsContentUtils::EnqueueLifecycleCallback(
-        document, nsIDocument::eDetached, this);
+     // Disconnected must be enqueued whenever a connected custom element becomes
+     // disconnected.
+    if (CustomElementRegistry::IsCustomElementEnabled() &&
+        GetCustomElementData()) {
+      nsContentUtils::EnqueueLifecycleCallback(nsIDocument::eDisconnected,
+                                               this);
     }
   }
 
@@ -2004,6 +1989,22 @@ Element::UnbindFromTree(bool aDeep, bool aNullParent)
 
     shadowRoot->SetIsComposedDocParticipant(false);
   }
+
+  // Unbinding of children is the only point in time where we don't enforce the
+  // "child has style data implies parent has it too" invariant.
+  //
+  // As such, the restyle root tracking may incorrectly end up setting dirty
+  // bits on the parent chain when moving from a not yet unbound root with
+  // already unbound parents to a root higher up in the tree, so we clear those
+  // (again, since they're also cleared in ClearServoData) here.
+  //
+  // This can happen when the element changes the state of some ancestor up in
+  // the tree, for example.
+  //
+  // Note that clearing the data itself here would have its own set of problems,
+  // since the invariant we'd be breaking in that case is "HasServoData()
+  // implies InComposedDoc()", which we rely on in various places.
+  UnsetFlags(kAllServoDescendantBits);
 }
 
 nsICSSDeclaration*
@@ -2621,7 +2622,7 @@ Element::SetAttrAndNotify(int32_t aNamespaceID,
     }
   }
 
-  if (nsContentUtils::IsWebComponentsEnabled()) {
+  if (CustomElementRegistry::IsCustomElementEnabled()) {
     if (CustomElementData* data = GetCustomElementData()) {
       if (CustomElementDefinition* definition =
             nsContentUtils::GetElementDefinitionIfObservingAttr(this,
@@ -2642,13 +2643,13 @@ Element::SetAttrAndNotify(int32_t aNamespaceID,
         LifecycleCallbackArgs args = {
           nsDependentAtomString(aName),
           aModType == nsIDOMMutationEvent::ADDITION ?
-            NullString() : nsDependentAtomString(oldValueAtom),
+            VoidString() : nsDependentAtomString(oldValueAtom),
           nsDependentAtomString(newValueAtom),
-          (ns.IsEmpty() ? NullString() : ns)
+          (ns.IsEmpty() ? VoidString() : ns)
         };
 
         nsContentUtils::EnqueueLifecycleCallback(
-          OwnerDoc(), nsIDocument::eAttributeChanged, this, &args, definition);
+          nsIDocument::eAttributeChanged, this, &args, definition);
       }
     }
   }
@@ -2925,7 +2926,7 @@ Element::UnsetAttr(int32_t aNameSpaceID, nsIAtom* aName,
     }
   }
 
-  if (nsContentUtils::IsWebComponentsEnabled()) {
+  if (CustomElementRegistry::IsCustomElementEnabled()) {
     if (CustomElementData* data = GetCustomElementData()) {
       if (CustomElementDefinition* definition =
             nsContentUtils::GetElementDefinitionIfObservingAttr(this,
@@ -2938,12 +2939,12 @@ Element::UnsetAttr(int32_t aNameSpaceID, nsIAtom* aName,
         LifecycleCallbackArgs args = {
           nsDependentAtomString(aName),
           nsDependentAtomString(oldValueAtom),
-          NullString(),
-          (ns.IsEmpty() ? NullString() : ns)
+          VoidString(),
+          (ns.IsEmpty() ? VoidString() : ns)
         };
 
         nsContentUtils::EnqueueLifecycleCallback(
-          OwnerDoc(), nsIDocument::eAttributeChanged, this, &args, definition);
+          nsIDocument::eAttributeChanged, this, &args, definition);
       }
     }
   }
@@ -3577,7 +3578,7 @@ Element::GetTransformToAncestor(Element& aAncestor)
     // then the call to GetTransformToAncestor will return the transform
     // all the way up through the parent chain.
     transform = nsLayoutUtils::GetTransformToAncestor(primaryFrame,
-      ancestorFrame, true);
+      ancestorFrame, nsIFrame::IN_CSS_UNITS);
   }
 
   DOMMatrixReadOnly* matrix = new DOMMatrix(this, transform);
@@ -3594,7 +3595,7 @@ Element::GetTransformToParent()
   if (primaryFrame) {
     nsIFrame* parentFrame = primaryFrame->GetParent();
     transform = nsLayoutUtils::GetTransformToAncestor(primaryFrame,
-      parentFrame, true);
+      parentFrame, nsIFrame::IN_CSS_UNITS);
   }
 
   DOMMatrixReadOnly* matrix = new DOMMatrix(this, transform);
@@ -3609,7 +3610,7 @@ Element::GetTransformToViewport()
   Matrix4x4 transform;
   if (primaryFrame) {
     transform = nsLayoutUtils::GetTransformToAncestor(primaryFrame,
-      nsLayoutUtils::GetDisplayRootFrame(primaryFrame), true);
+      nsLayoutUtils::GetDisplayRootFrame(primaryFrame), nsIFrame::IN_CSS_UNITS);
   }
 
   DOMMatrixReadOnly* matrix = new DOMMatrix(this, transform);
@@ -4194,10 +4195,7 @@ Element::ClearServoData(nsIDocument* aDoc) {
   // is necessary for correctness, since we invoke ClearServoData in various
   // places where an element's flattened tree parent changes, and such a change
   // may also make an element invalid to be used as a restyle root.
-  //
-  // Note that we need to null-check aDoc, which may be null in some situations
-  // when invoked from UnbindFromTree.
-  if (aDoc && aDoc->GetServoRestyleRoot() == this) {
+  if (aDoc->GetServoRestyleRoot() == this) {
     aDoc->ClearServoRestyleRoot();
   }
 #else
@@ -4211,6 +4209,26 @@ Element::SetCustomElementData(CustomElementData* aData)
   nsExtendedDOMSlots *slots = ExtendedDOMSlots();
   MOZ_ASSERT(!slots->mCustomElementData, "Custom element data may not be changed once set.");
   slots->mCustomElementData = aData;
+}
+
+CustomElementDefinition*
+Element::GetCustomElementDefinition() const
+{
+  CustomElementData* data = GetCustomElementData();
+  if (!data) {
+    return nullptr;
+  }
+
+  return data->GetCustomElementDefinition();
+}
+
+void
+Element::SetCustomElementDefinition(CustomElementDefinition* aDefinition)
+{
+  CustomElementData* data = GetCustomElementData();
+  MOZ_ASSERT(data);
+
+  data->SetCustomElementDefinition(aDefinition);
 }
 
 MOZ_DEFINE_MALLOC_SIZE_OF(ServoElementMallocSizeOf)

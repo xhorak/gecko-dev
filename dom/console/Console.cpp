@@ -1660,7 +1660,7 @@ Console::PopulateConsoleNotificationInTheTargetScope(JSContext* aCx,
       if (NS_WARN_IF(!JS_DefineProperty(aCx, eventObj, "stacktrace",
                                         JS_DATA_TO_FUNC_PTR(JSNative, funObj.get()),
                                         nullptr,
-                                        JSPROP_ENUMERATE | JSPROP_SHARED |
+                                        JSPROP_ENUMERATE |
                                         JSPROP_GETTER | JSPROP_SETTER))) {
         return false;
       }
@@ -1844,7 +1844,7 @@ Console::ProcessArguments(JSContext* aCx,
           int32_t diff = aSequence.Length() - aStyles.Length();
           if (diff > 0) {
             for (int32_t i = 0; i < diff; i++) {
-              if (NS_WARN_IF(!aStyles.AppendElement(NullString(), fallible))) {
+              if (NS_WARN_IF(!aStyles.AppendElement(VoidString(), fallible))) {
                 return false;
               }
             }

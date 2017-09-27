@@ -221,9 +221,6 @@ pref("browser.uitour.url", "https://www.mozilla.org/%LOCALE%/firefox/%VERSION%/t
 // How long to show a Hearbeat survey (two hours, in seconds)
 pref("browser.uitour.surveyDuration", 7200);
 
-pref("browser.customizemode.tip0.shown", false);
-pref("browser.customizemode.tip0.learnMoreUrl", "https://support.mozilla.org/1/firefox/%VERSION%/%OS%/%LOCALE%/customize");
-
 pref("keyword.enabled", true);
 pref("browser.fixup.domainwhitelist.localhost", true);
 
@@ -495,8 +492,6 @@ pref("browser.bookmarks.autoExportHTML",          false);
 //  0: no backups created (and deletes all existing backups)
 pref("browser.bookmarks.max_backups",             15);
 
-pref("browser.bookmarks.showRecentlyBookmarked",  true);
-
 // Whether menu should close after Ctrl-click, middle-click, etc.
 pref("browser.bookmarks.openInTabClosesMenu", true);
 
@@ -506,8 +501,6 @@ pref("javascript.options.showInConsole",          true);
 #ifdef DEBUG
 pref("general.warnOnAboutConfig",                 false);
 #endif
-
-pref("jsloader.shareGlobal", true);
 
 // This is the pref to control the location bar, change this to true to
 // force this - this makes the origin of popup windows more obvious to avoid
@@ -676,6 +669,10 @@ pref("accessibility.typeaheadfind.timeout", 5000);
 pref("accessibility.typeaheadfind.linksonly", false);
 pref("accessibility.typeaheadfind.flashBar", 1);
 
+// Accessibility indicator preferences such as support URL, enabled flag.
+pref("accessibility.support.url", "https://support.mozilla.org/%LOCALE%/kb/accessibility-services");
+pref("accessibility.indicator.enabled", true);
+
 pref("plugins.click_to_play", true);
 pref("plugins.testmode", false);
 
@@ -693,14 +690,8 @@ pref("plugin.defaultXpi.state", 2);
 // Java is Click-to-Activate by default on all channels.
 pref("plugin.state.java", 1);
 
-// Flash is Click-to-Activate by default on Nightly.
-// On other channels, it will be controlled by a
-// rollout system addon.
-#ifdef NIGHTLY_BUILD
+// Flash is Click-to-Activate by default on all channels.
 pref("plugin.state.flash", 1);
-#else
-pref("plugin.state.flash", 2);
-#endif
 
 // Enables the download and use of the flash blocklists.
 pref("plugins.flashBlock.enabled", true);
@@ -1035,7 +1026,11 @@ pref("dom.ipc.plugins.sandbox-level.flash", 0);
 // On windows these levels are:
 // See - security/sandbox/win/src/sandboxbroker/sandboxBroker.cpp
 // SetSecurityLevelForContentProcess() for what the different settings mean.
+#if defined(NIGHTLY_BUILD)
 pref("security.sandbox.content.level", 4);
+#else
+pref("security.sandbox.content.level", 3);
+#endif
 
 // This controls the depth of stack trace that is logged when Windows sandbox
 // logging is turned on.  This is only currently available for the content
@@ -1088,11 +1083,7 @@ pref("security.sandbox.content.level", 3);
 //
 // This setting may not be required anymore once we decide to permanently
 // enable the content sandbox.
-#ifdef NIGHTLY_BUILD
 pref("security.sandbox.content.level", 3);
-#else
-pref("security.sandbox.content.level", 2);
-#endif
 pref("security.sandbox.content.write_path_whitelist", "");
 pref("security.sandbox.content.read_path_whitelist", "");
 pref("security.sandbox.content.syscall_whitelist", "");
@@ -1713,17 +1704,6 @@ pref("extensions.formautofill.loglevel", "Warn");
 
 // Whether or not to restore a session with lazy-browser tabs.
 pref("browser.sessionstore.restore_tabs_lazily", true);
-
-// Enable safebrowsing v4 tables (suffixed by "-proto") update.
-pref("urlclassifier.malwareTable", "goog-malware-proto,goog-unwanted-proto,test-harmful-simple,test-malware-simple,test-unwanted-simple");
-#ifdef MOZILLA_OFFICIAL
-pref("urlclassifier.phishTable", "goog-phish-proto,test-phish-simple");
-#else
-pref("urlclassifier.phishTable", "googpub-phish-proto,test-phish-simple");
-#endif
-
-pref("urlclassifier.downloadAllowTable", "goog-downloadwhite-proto");
-pref("urlclassifier.downloadBlockTable", "goog-badbinurl-proto");
 
 pref("browser.suppress_first_window_animation", true);
 

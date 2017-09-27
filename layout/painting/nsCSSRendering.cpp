@@ -46,7 +46,7 @@
 #include "nsCSSFrameConstructor.h"
 #include "nsCSSProps.h"
 #include "nsContentUtils.h"
-#include "nsSVGEffects.h"
+#include "SVGObserverUtils.h"
 #include "nsSVGIntegrationUtils.h"
 #include "gfxDrawable.h"
 #include "GeckoProfiler.h"
@@ -761,13 +761,11 @@ ConstructBorderRenderer(nsPresContext* aPresContext,
 
   uint8_t borderStyles[4];
   nscolor borderColors[4];
-  nsBorderColors* compositeColors[4];
 
-  // pull out styles, colors, composite colors
+  // pull out styles, colors
   NS_FOR_CSS_SIDES (i) {
     borderStyles[i] = aStyleBorder.GetBorderStyle(i);
     borderColors[i] = ourColor->CalcComplexColor(aStyleBorder.mBorderColor[i]);
-    aStyleBorder.GetCompositeColors(i, &compositeColors[i]);
   }
 
   PrintAsFormatString(" borderStyles: %d %d %d %d\n", borderStyles[0], borderStyles[1], borderStyles[2], borderStyles[3]);
@@ -787,8 +785,9 @@ ConstructBorderRenderer(nsPresContext* aPresContext,
                              borderWidths,
                              bgRadii,
                              borderColors,
-                             compositeColors,
-                             bgColor);
+                             aStyleBorder.mBorderColors.get(),
+                             bgColor,
+                             !aForFrame->BackfaceIsHidden());
 }
 
 
@@ -1067,7 +1066,8 @@ nsCSSRendering::CreateBorderRendererForOutline(nsPresContext* aPresContext,
                          outlineRadii,
                          outlineColors,
                          nullptr,
-                         bgColor);
+                         bgColor,
+                         !aForFrame->BackfaceIsHidden());
 
   return Some(br);
 }
@@ -1129,6 +1129,9 @@ nsCSSRendering::PaintFocus(nsPresContext* aPresContext,
   // something that CSS can style, this function will then have access
   // to a style context and can use the same logic that PaintBorder
   // and PaintOutline do.)
+  //
+  // WebRender layers-free mode don't use PaintFocus function. Just assign
+  // the backface-visibility to true for this case.
   nsCSSBorderRenderer br(aPresContext,
                          nullptr,
                          aDrawTarget,
@@ -1139,7 +1142,8 @@ nsCSSRendering::PaintFocus(nsPresContext* aPresContext,
                          focusRadii,
                          focusColors,
                          nullptr,
-                         NS_RGB(255, 0, 0));
+                         NS_RGB(255, 0, 0),
+                         true);
   br.DrawBorders();
 
   PrintAsStringNewline();
@@ -1994,8 +1998,8 @@ nsCSSRendering::CanBuildWebRenderDisplayItemsForStyleImageLayer(LayerManager* aM
 DrawResult
 nsCSSRendering::BuildWebRenderDisplayItemsForStyleImageLayer(const PaintBGParams& aParams,
                                                              mozilla::wr::DisplayListBuilder& aBuilder,
+                                                             mozilla::wr::IpcResourceUpdateQueue& aResources,
                                                              const mozilla::layers::StackingContextHelper& aSc,
-                                                             nsTArray<WebRenderParentCommand>& aParentCommands,
                                                              mozilla::layers::WebRenderDisplayItemLayer* aLayer,
                                                              mozilla::layers::WebRenderLayerManager* aManager,
                                                              nsDisplayItem* aItem)
@@ -2021,7 +2025,7 @@ nsCSSRendering::BuildWebRenderDisplayItemsForStyleImageLayer(const PaintBGParams
 
     sc = aParams.frame->StyleContext();
   }
-  return BuildWebRenderDisplayItemsForStyleImageLayerWithSC(aParams, aBuilder, aSc, aParentCommands,
+  return BuildWebRenderDisplayItemsForStyleImageLayerWithSC(aParams, aBuilder, aResources, aSc,
                                                             aLayer, aManager, aItem,
                                                             sc, *aParams.frame->StyleBorder());
 }
@@ -2743,8 +2747,8 @@ nsCSSRendering::PaintStyleImageLayerWithSC(const PaintBGParams& aParams,
 DrawResult
 nsCSSRendering::BuildWebRenderDisplayItemsForStyleImageLayerWithSC(const PaintBGParams& aParams,
                                                                    mozilla::wr::DisplayListBuilder& aBuilder,
+                                                                   mozilla::wr::IpcResourceUpdateQueue& aResources,
                                                                    const mozilla::layers::StackingContextHelper& aSc,
-                                                                   nsTArray<WebRenderParentCommand>& aParentCommands,
                                                                    mozilla::layers::WebRenderDisplayItemLayer* aLayer,
                                                                    mozilla::layers::WebRenderLayerManager* aManager,
                                                                    nsDisplayItem* aItem,
@@ -2787,7 +2791,7 @@ nsCSSRendering::BuildWebRenderDisplayItemsForStyleImageLayerWithSC(const PaintBG
   result &= state.mImageRenderer.PrepareResult();
   if (!state.mFillArea.IsEmpty()) {
     return state.mImageRenderer.BuildWebRenderDisplayItemsForLayer(&aParams.presCtx,
-                                     aBuilder, aSc, aParentCommands,
+                                     aBuilder, aResources, aSc,
                                      aLayer, aManager, aItem,
                                      state.mDestArea, state.mFillArea,
                                      state.mAnchor + paintBorderArea.TopLeft(),
@@ -3064,7 +3068,7 @@ nsCSSRendering::ComputeBorderSpacedRepeatSize(nscoord aImageDimension,
                                               nscoord aAvailableSpace,
                                               nscoord& aSpace)
 {
-  int32_t count = aAvailableSpace / aImageDimension;
+  int32_t count = aImageDimension ? (aAvailableSpace / aImageDimension) : 0;
   aSpace = (aAvailableSpace - aImageDimension * count) / (count + 1);
   return aSpace + aImageDimension;
 }
@@ -3825,6 +3829,11 @@ nsCSSRendering::PaintDecorationLine(nsIFrame* aFrame, DrawTarget& aDrawTarget,
 
   AutoPopClips autoPopClips(&aDrawTarget);
 
+  mozilla::layout::TextDrawTarget* textDrawer = nullptr;
+  if (aDrawTarget.GetBackendType() == BackendType::WEBRENDER_TEXT) {
+    textDrawer = static_cast<mozilla::layout::TextDrawTarget*>(&aDrawTarget);
+  }
+
   switch (aParams.style) {
     case NS_STYLE_TEXT_DECORATION_STYLE_SOLID:
     case NS_STYLE_TEXT_DECORATION_STYLE_DOUBLE:
@@ -3895,8 +3904,8 @@ nsCSSRendering::PaintDecorationLine(nsIFrame* aFrame, DrawTarget& aDrawTarget,
     case NS_STYLE_TEXT_DECORATION_STYLE_DASHED: {
       Point p1 = rect.TopLeft();
       Point p2 = aParams.vertical ? rect.BottomLeft() : rect.TopRight();
-      if (aParams.textDrawer) {
-        aParams.textDrawer->AppendDecoration(
+      if (textDrawer) {
+        textDrawer->AppendDecoration(
           p1, p2, lineThickness, aParams.vertical, color, aParams.style);
       } else {
         aDrawTarget.StrokeLine(p1, p2, colorPat, strokeOptions, drawOptions);
@@ -3930,11 +3939,11 @@ nsCSSRendering::PaintDecorationLine(nsIFrame* aFrame, DrawTarget& aDrawTarget,
       Point p1b = aParams.vertical ? rect.TopRight() : rect.BottomLeft();
       Point p2b = rect.BottomRight();
 
-      if (aParams.textDrawer) {
-        aParams.textDrawer->AppendDecoration(
+      if (textDrawer) {
+        textDrawer->AppendDecoration(
           p1a, p2a, lineThickness, aParams.vertical, color,
           NS_STYLE_TEXT_DECORATION_STYLE_SOLID);
-        aParams.textDrawer->AppendDecoration(
+        textDrawer->AppendDecoration(
           p1b, p2b, lineThickness, aParams.vertical, color,
           NS_STYLE_TEXT_DECORATION_STYLE_SOLID);
       } else {
@@ -4004,11 +4013,11 @@ nsCSSRendering::PaintDecorationLine(nsIFrame* aFrame, DrawTarget& aDrawTarget,
 
       rectICoord += lineThickness / 2.0;
 
-      if (aParams.textDrawer) {
+      if (textDrawer) {
         Point p1 = rect.TopLeft();
         Point p2 = aParams.vertical ? rect.BottomLeft() : rect.TopRight();
 
-        aParams.textDrawer->AppendDecoration(
+        textDrawer->AppendDecoration(
           p1, p2, adv, aParams.vertical, color,
           NS_STYLE_TEXT_DECORATION_STYLE_WAVY);
         return;

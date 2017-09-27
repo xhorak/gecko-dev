@@ -445,7 +445,7 @@ public abstract class GeckoApp extends GeckoActivity
     }
 
     public MenuPanel getMenuPanel() {
-        if (mMenuPanel == null) {
+        if (mMenuPanel == null || mMenu == null) {
             onCreatePanelMenu(Window.FEATURE_OPTIONS_PANEL, null);
             invalidateOptionsMenu();
         }
@@ -673,7 +673,7 @@ public abstract class GeckoApp extends GeckoActivity
             GeckoAccessibility.updateAccessibilitySettings(this);
 
         } else if ("Accessibility:Event".equals(event)) {
-            GeckoAccessibility.sendAccessibilityEvent(message);
+            GeckoAccessibility.sendAccessibilityEvent(mLayerView, message);
 
         } else if ("Bookmark:Insert".equals(event)) {
             final BrowserDB db = BrowserDB.from(getProfile());

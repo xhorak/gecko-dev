@@ -109,7 +109,14 @@ WebRenderLayerManager::DoDestroy(bool aIsSync)
     WrBridge()->Destroy(aIsSync);
   }
 
+  // Clear this before calling RemoveUnusedAndResetWebRenderUserData(),
+  // otherwise that function might destroy some WebRenderAnimationData instances
+  // which will put stuff back into mDiscardedCompositorAnimationsIds. If
+  // mActiveCompositorAnimationIds is empty that won't happen.
+  mActiveCompositorAnimationIds.clear();
+
   mLastCanvasDatas.Clear();
+  RemoveUnusedAndResetWebRenderUserData();
 
   if (mTransactionIdAllocator) {
     // Make sure to notify the refresh driver just in case it's waiting on a
@@ -256,11 +263,6 @@ WebRenderLayerManager::CreateWebRenderCommandsFromDisplayList(nsDisplayList* aDi
       continue;
     }
 
-    if (item->BackfaceIsHidden() && aSc.IsBackfaceVisible()) {
-      item->Destroy(aDisplayListBuilder);
-      continue;
-    }
-
     savedItems.AppendToTop(item);
 
     bool forceNewLayerData = false;
@@ -340,7 +342,7 @@ WebRenderLayerManager::CreateWebRenderCommandsFromDisplayList(nsDisplayList* aDi
 
       // Note: this call to CreateWebRenderCommands can recurse back into
       // this function if the |item| is a wrapper for a sublist.
-      if (!item->CreateWebRenderCommands(aBuilder, aResources, aSc, mParentCommands, this,
+      if (!item->CreateWebRenderCommands(aBuilder, aResources, aSc, this,
                                          aDisplayListBuilder)) {
         PushItemAsImage(item, aBuilder, aResources, aSc, aDisplayListBuilder);
       }
@@ -390,6 +392,7 @@ Maybe<wr::ImageKey>
 WebRenderLayerManager::CreateImageKey(nsDisplayItem* aItem,
                                       ImageContainer* aContainer,
                                       mozilla::wr::DisplayListBuilder& aBuilder,
+                                      mozilla::wr::IpcResourceUpdateQueue& aResources,
                                       const StackingContextHelper& aSc,
                                       gfx::IntSize& aSize)
 {
@@ -408,6 +411,9 @@ WebRenderLayerManager::CreateImageKey(nsDisplayItem* aItem,
     if (!aContainer->GetScaleHint().IsEmpty()) {
       scaleToSize = Some(aContainer->GetScaleHint());
     }
+    // TODO!
+    // We appear to be using the image bridge for a lot (most/all?) of
+    // layers-free image handling and that breaks frame consistency.
     imageData->CreateAsyncImageWebRenderCommands(aBuilder,
                                                  aContainer,
                                                  aSc,
@@ -416,7 +422,8 @@ WebRenderLayerManager::CreateImageKey(nsDisplayItem* aItem,
                                                  gfx::Matrix4x4(),
                                                  scaleToSize,
                                                  wr::ImageRendering::Auto,
-                                                 wr::MixBlendMode::Normal);
+                                                 wr::MixBlendMode::Normal,
+                                                 !aItem->BackfaceIsHidden());
     return Nothing();
   }
 
@@ -427,18 +434,21 @@ WebRenderLayerManager::CreateImageKey(nsDisplayItem* aItem,
   mozilla::layers::Image* image = autoLock.GetImage();
   aSize = image->GetSize();
 
-  return imageData->UpdateImageKey(aContainer);
+  return imageData->UpdateImageKey(aContainer, aResources);
 }
 
 bool
 WebRenderLayerManager::PushImage(nsDisplayItem* aItem,
                                  ImageContainer* aContainer,
                                  mozilla::wr::DisplayListBuilder& aBuilder,
+                                 mozilla::wr::IpcResourceUpdateQueue& aResources,
                                  const StackingContextHelper& aSc,
                                  const LayerRect& aRect)
 {
   gfx::IntSize size;
-  Maybe<wr::ImageKey> key = CreateImageKey(aItem, aContainer, aBuilder, aSc, size);
+  Maybe<wr::ImageKey> key = CreateImageKey(aItem, aContainer,
+                                          aBuilder, aResources,
+                                          aSc, size);
   if (aContainer->IsAsync()) {
     // Async ImageContainer does not create ImageKey, instead it uses Pipeline.
     MOZ_ASSERT(key.isNothing());
@@ -450,7 +460,7 @@ WebRenderLayerManager::PushImage(nsDisplayItem* aItem,
 
   auto r = aSc.ToRelativeLayoutRect(aRect);
   SamplingFilter sampleFilter = nsLayoutUtils::GetSamplingFilterForFrame(aItem->Frame());
-  aBuilder.PushImage(r, r, wr::ToImageRendering(sampleFilter), key.value());
+  aBuilder.PushImage(r, r, !aItem->BackfaceIsHidden(), wr::ToImageRendering(sampleFilter), key.value());
 
   return true;
 }
@@ -460,7 +470,9 @@ PaintItemByDrawTarget(nsDisplayItem* aItem,
                       DrawTarget* aDT,
                       const LayerRect& aImageRect,
                       const LayerPoint& aOffset,
-                      nsDisplayListBuilder* aDisplayListBuilder)
+                      nsDisplayListBuilder* aDisplayListBuilder,
+                      RefPtr<BasicLayerManager>& aManager,
+                      WebRenderLayerManager* aWrManager)
 {
   MOZ_ASSERT(aDT);
 
@@ -475,21 +487,43 @@ PaintItemByDrawTarget(nsDisplayItem* aItem,
     break;
   case DisplayItemType::TYPE_FILTER:
     {
-      RefPtr<BasicLayerManager> tempManager = new BasicLayerManager(BasicLayerManager::BLM_INACTIVE);
+      if (aManager == nullptr) {
+        aManager = new BasicLayerManager(BasicLayerManager::BLM_INACTIVE);
+      }
+
       FrameLayerBuilder* layerBuilder = new FrameLayerBuilder();
-      layerBuilder->Init(aDisplayListBuilder, tempManager);
+      layerBuilder->Init(aDisplayListBuilder, aManager);
+      layerBuilder->DidBeginRetainedLayerTransaction(aManager);
 
-      tempManager->BeginTransactionWithTarget(context);
+      aManager->BeginTransactionWithTarget(context);
+
       ContainerLayerParameters param;
-      RefPtr<Layer> layer = aItem->BuildLayer(aDisplayListBuilder, tempManager, param);
+      RefPtr<Layer> layer =
+        static_cast<nsDisplayFilter*>(aItem)->BuildLayer(aDisplayListBuilder,
+                                                         aManager, param);
+
       if (layer) {
-        tempManager->SetRoot(layer);
-        static_cast<nsDisplayFilter*>(aItem)->PaintAsLayer(aDisplayListBuilder, context, tempManager);
+        UniquePtr<LayerProperties> props;
+        props = Move(LayerProperties::CloneFrom(aManager->GetRoot()));
+
+        aManager->SetRoot(layer);
+        layerBuilder->WillEndTransaction();
+
+        nsIntRegion invalid;
+        props->ComputeDifferences(layer, invalid, nullptr);
+
+        static_cast<nsDisplayFilter*>(aItem)->PaintAsLayer(aDisplayListBuilder,
+                                                           context, aManager);
+
+        if (!invalid.IsEmpty()) {
+          aWrManager->SetNotifyInvalidation(true);
+        }
       }
 
-      if (tempManager->InTransaction()) {
-        tempManager->AbortTransaction();
+      if (aManager->InTransaction()) {
+        aManager->AbortTransaction();
       }
+      aManager->SetTarget(nullptr);
       break;
     }
   default:
@@ -550,11 +584,18 @@ WebRenderLayerManager::GenerateFallbackData(nsDisplayItem* aItem,
   }
 
   aOffset = RoundedToInt(bounds.TopLeft());
-  nsRegion invalidRegion;
+
+  bool needPaint = true;
   nsAutoPtr<nsDisplayItemGeometry> geometry = fallbackData->GetGeometry();
 
-  if (geometry) {
+
+  // nsDisplayFilter is rendered via BasicLayerManager which means the invalidate
+  // region is unknown until we traverse the displaylist contained by it.
+  if (geometry && !fallbackData->IsInvalid() &&
+      aItem->GetType() != DisplayItemType::TYPE_FILTER) {
     nsRect invalid;
+    nsRegion invalidRegion;
+
     if (aItem->IsInvalid(invalid)) {
       invalidRegion.OrWith(clippedBounds);
     } else {
@@ -570,11 +611,12 @@ WebRenderLayerManager::GenerateFallbackData(nsDisplayItem* aItem,
         invalidRegion.OrWith(clippedBounds);
       }
     }
+    needPaint = !invalidRegion.IsEmpty();
   }
 
-  gfx::SurfaceFormat format = aItem->GetType() == DisplayItemType::TYPE_MASK ?
-                                                    gfx::SurfaceFormat::A8 : gfx::SurfaceFormat::B8G8R8A8;
-  if (!geometry || !invalidRegion.IsEmpty() || fallbackData->IsInvalid()) {
+  if (needPaint) {
+    gfx::SurfaceFormat format = aItem->GetType() == DisplayItemType::TYPE_MASK ?
+                                                      gfx::SurfaceFormat::A8 : gfx::SurfaceFormat::B8G8R8A8;
     if (gfxPrefs::WebRenderBlobImages()) {
       bool snapped;
       bool isOpaque = aItem->GetOpaqueRegion(aDisplayListBuilder, &snapped).Contains(clippedBounds);
@@ -584,7 +626,8 @@ WebRenderLayerManager::GenerateFallbackData(nsDisplayItem* aItem,
       RefPtr<gfx::DrawTarget> dummyDt =
         gfx::Factory::CreateDrawTarget(gfx::BackendType::SKIA, gfx::IntSize(1, 1), gfx::SurfaceFormat::B8G8R8A8);
       RefPtr<gfx::DrawTarget> dt = gfx::Factory::CreateRecordingDrawTarget(recorder, dummyDt, imageSize.ToUnknownSize());
-      PaintItemByDrawTarget(aItem, dt, aImageRect, aOffset, aDisplayListBuilder);
+      PaintItemByDrawTarget(aItem, dt, aImageRect, aOffset, aDisplayListBuilder,
+                            fallbackData->mBasicLayerManager, this);
       recorder->Finish();
 
       Range<uint8_t> bytes((uint8_t*)recorder->mOutputStream.mData, recorder->mOutputStream.mLength);
@@ -604,7 +647,9 @@ WebRenderLayerManager::GenerateFallbackData(nsDisplayItem* aItem,
           if (!dt) {
             return nullptr;
           }
-          PaintItemByDrawTarget(aItem, dt, aImageRect, aOffset, aDisplayListBuilder);
+          PaintItemByDrawTarget(aItem, dt, aImageRect, aOffset,
+                                aDisplayListBuilder,
+                                fallbackData->mBasicLayerManager, this);
         }
         if (!helper.UpdateImage()) {
           return nullptr;
@@ -614,7 +659,7 @@ WebRenderLayerManager::GenerateFallbackData(nsDisplayItem* aItem,
       // Force update the key in fallback data since we repaint the image in this path.
       // If not force update, fallbackData may reuse the original key because it
       // doesn't know UpdateImageHelper already updated the image container.
-      if (!fallbackData->UpdateImageKey(imageContainer, true)) {
+      if (!fallbackData->UpdateImageKey(imageContainer, aResources, true)) {
         return nullptr;
       }
     }
@@ -676,6 +721,7 @@ WebRenderLayerManager::PushItemAsImage(nsDisplayItem* aItem,
   SamplingFilter sampleFilter = nsLayoutUtils::GetSamplingFilterForFrame(aItem->Frame());
   aBuilder.PushImage(dest,
                      dest,
+                     !aItem->BackfaceIsHidden(),
                      wr::ToImageRendering(sampleFilter),
                      fallbackData->GetKey().value());
   return true;
@@ -764,6 +810,10 @@ WebRenderLayerManager::EndTransactionInternal(DrawPaintedLayerCallback aCallback
       }
       mLayerScrollData.clear();
       mClipIdCache.clear();
+
+      // Remove the user data those are not displayed on the screen and
+      // also reset the data to unused for next transaction.
+      RemoveUnusedAndResetWebRenderUserData();
     } else {
       for (auto iter = mLastCanvasDatas.Iter(); !iter.Done(); iter.Next()) {
         RefPtr<WebRenderCanvasData> canvasData = iter.Get()->GetKey();
@@ -947,15 +997,37 @@ WebRenderLayerManager::DiscardImages()
 }
 
 void
+WebRenderLayerManager::AddActiveCompositorAnimationId(uint64_t aId)
+{
+  // In layers-free mode we track the active compositor animation ids on the
+  // client side so that we don't try to discard the same animation id multiple
+  // times. We could just ignore the multiple-discard on the parent side, but
+  // checking on the content side reduces IPC traffic.
+  MOZ_ASSERT(IsLayersFreeTransaction());
+  mActiveCompositorAnimationIds.insert(aId);
+}
+
+void
 WebRenderLayerManager::AddCompositorAnimationsIdForDiscard(uint64_t aId)
 {
-  mDiscardedCompositorAnimationsIds.AppendElement(aId);
+  if (!IsLayersFreeTransaction()) {
+    // For layers-full we don't track the active animation id in
+    // mActiveCompositorAnimationIds, we just call this on layer destruction and
+    // don't need to worry about discarding the same id multiple times.
+    mDiscardedCompositorAnimationsIds.AppendElement(aId);
+  } else if (mActiveCompositorAnimationIds.erase(aId)) {
+    // For layers-free ensure we don't try to discard an animation id that wasn't
+    // active. We also remove it from mActiveCompositorAnimationIds so we don't
+    // discard it again unless it gets re-activated.
+    mDiscardedCompositorAnimationsIds.AppendElement(aId);
+  }
 }
 
 void
 WebRenderLayerManager::DiscardCompositorAnimations()
 {
-  if (WrBridge()->IPCOpen() && !mDiscardedCompositorAnimationsIds.IsEmpty()) {
+  if (WrBridge()->IPCOpen() &&
+      !mDiscardedCompositorAnimationsIds.IsEmpty()) {
     WrBridge()->
       SendDeleteCompositorAnimations(mDiscardedCompositorAnimationsIds);
   }

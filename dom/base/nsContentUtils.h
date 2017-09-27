@@ -800,6 +800,7 @@ public:
                             nsINode* aContext,
                             nsIDocument* aLoadingDocument,
                             nsIPrincipal* aLoadingPrincipal,
+                            uint64_t aRequestContextID,
                             nsIURI* aReferrer,
                             mozilla::net::ReferrerPolicy aReferrerPolicy,
                             imgINotificationObserver* aObserver,
@@ -2926,6 +2927,17 @@ public:
   static StorageAccess StorageAllowedForWindow(nsPIDOMWindowInner* aWindow);
 
   /*
+   * Checks if storage for the given document is permitted by a combination of
+   * the user's preferences, and whether the document's window is a third-party
+   * iframe.
+   *
+   * Note, this may be used on documents during the loading process where
+   * the window's extant document has not been set yet.  The code in
+   * StorageAllowedForWindow(), however, will not work in these cases.
+   */
+  static StorageAccess StorageAllowedForDocument(nsIDocument* aDoc);
+
+  /*
    * Checks if storage for the given principal is permitted by the user's
    * preferences. The caller is assumed to not be a third-party iframe.
    * (if that is possible, the caller should use StorageAllowedForWindow)
@@ -2986,8 +2998,14 @@ public:
                                       nsIAtom* aExtensionType,
                                       nsIAtom* aAttrName);
 
-  static void EnqueueLifecycleCallback(nsIDocument* aDoc,
-                                       nsIDocument::ElementCallbackType aType,
+  static void SyncInvokeReactions(nsIDocument::ElementCallbackType aType,
+                                  Element* aCustomElement,
+                                  mozilla::dom::CustomElementDefinition* aDefinition);
+
+  static void EnqueueUpgradeReaction(Element* aElement,
+                                     mozilla::dom::CustomElementDefinition* aDefinition);
+
+  static void EnqueueLifecycleCallback(nsIDocument::ElementCallbackType aType,
                                        Element* aCustomElement,
                                        mozilla::dom::LifecycleCallbackArgs* aArgs = nullptr,
                                        mozilla::dom::CustomElementDefinition* aDefinition = nullptr);
@@ -3020,6 +3038,19 @@ public:
                                             uint32_t aFlags);
 
   /**
+   * Query loadingPrincipal if it is specified as 'loadingprincipal' attribute on
+   * aLoadingNode, otherwise the NodePrincipal of aLoadingNode is returned
+   * (which is System Principal).
+   *
+   * Return true if aLoadingPrincipal has 'loadingprincipal' attributes, and
+   * the value 'loadingprincipal' is also successfully deserialized, otherwise
+   * return false.
+   */
+  static bool
+  GetLoadingPrincipalForXULNode(nsIContent* aLoadingNode,
+                                nsIPrincipal** aLoadingPrincipal);
+
+  /**
    * Returns the content policy type that should be used for loading images
    * for displaying in the UI.  The sources of such images can be <xul:image>,
    * <xul:menuitem> on OSX where we load the image through nsMenuItemIconX, etc.
@@ -3027,7 +3058,8 @@ public:
   static void
   GetContentPolicyTypeForUIImageLoading(nsIContent* aLoadingNode,
                                         nsIPrincipal** aLoadingPrincipal,
-                                        nsContentPolicyType& aContentPolicyType);
+                                        nsContentPolicyType& aContentPolicyType,
+                                        uint64_t* aRequestContextID);
 
   static nsresult
   CreateJSValueFromSequenceOfObject(JSContext* aCx,

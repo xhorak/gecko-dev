@@ -432,11 +432,7 @@ pref("media.decoder-doctor.wmf-disabled-is-failure", false);
 pref("media.decoder-doctor.new-issue-endpoint", "https://webcompat.com/issues/new");
 
 // Whether to suspend decoding of videos in background tabs.
-#ifdef RELEASE_OR_BETA
-pref("media.suspend-bkgnd-video.enabled", false);
-#else
 pref("media.suspend-bkgnd-video.enabled", true);
-#endif
 // Delay, in ms, from time window goes to background to suspending
 // video decoders. Defaults to 10 seconds.
 pref("media.suspend-bkgnd-video.delay-ms", 10000);
@@ -878,12 +874,13 @@ pref("gfx.webrender.force-angle", true);
 #endif
 
 pref("gfx.webrender.highlight-painted-layers", false);
-pref("gfx.webrender.layers-free", false);
+pref("gfx.webrender.layers-free", true);
 pref("gfx.webrender.blob-images", false);
 
 // WebRender debugging utilities.
 pref("gfx.webrender.debug.texture-cache", false);
 pref("gfx.webrender.debug.render-targets", false);
+pref("gfx.webrender.debug.alpha-primitives", false);
 pref("gfx.webrender.debug.profiler", false);
 
 // Whether webrender should be used as much as possible.
@@ -1426,7 +1423,7 @@ pref("javascript.options.ion",              true);
 pref("javascript.options.asmjs",            true);
 pref("javascript.options.wasm",             true);
 pref("javascript.options.wasm_ionjit",      true);
-pref("javascript.options.wasm_baselinejit", false);
+pref("javascript.options.wasm_baselinejit", true);
 pref("javascript.options.native_regexp",    true);
 pref("javascript.options.parallel_parsing", true);
 #if !defined(RELEASE_OR_BETA) && !defined(ANDROID) && !defined(XP_IOS)
@@ -5080,12 +5077,6 @@ pref("dom.battery.enabled", true);
 // Streams API
 pref("dom.streams.enabled", false);
 
-// Abort API
-pref("dom.abortController.enabled", true);
-
-// Fetch + Abort API
-pref("dom.abortController.fetch.enabled", true);
-
 // Push
 
 pref("dom.push.enabled", false);
@@ -5251,7 +5242,7 @@ pref("network.activity.blipIntervalMilliseconds", 0);
 // loader (JS components, JSMs, etc). This saves memory, but makes it possible
 // for the scripts to interfere with each other.  A restart is required for this
 // to take effect.
-pref("jsloader.shareGlobal", false);
+pref("jsloader.shareGlobal", true);
 
 // When we're asked to take a screenshot, don't wait more than 2000ms for the
 // event loop to become idle before actually taking the screenshot.
@@ -5379,18 +5370,18 @@ pref("dom.flyweb.enabled", false);
 pref("dom.mapped_arraybuffer.enabled", true);
 
 // The tables used for Safebrowsing phishing and malware checks
-pref("urlclassifier.malwareTable", "goog-malware-shavar,goog-unwanted-shavar,test-harmful-simple,test-malware-simple,test-unwanted-simple");
+pref("urlclassifier.malwareTable", "goog-malware-proto,goog-unwanted-proto,test-harmful-simple,test-malware-simple,test-unwanted-simple");
 #ifdef MOZILLA_OFFICIAL
-// In the official build, we are allowed to use google's private
-// phishing list "goog-phish-shavar". See Bug 1288840.
-pref("urlclassifier.phishTable", "goog-phish-shavar,test-phish-simple");
+// In official builds, we are allowed to use Google's private phishing
+// list (see bug 1288840).
+pref("urlclassifier.phishTable", "goog-phish-proto,test-phish-simple");
 #else
-pref("urlclassifier.phishTable", "googpub-phish-shavar,test-phish-simple");
+pref("urlclassifier.phishTable", "googpub-phish-proto,test-phish-simple");
 #endif
 
 // Tables for application reputation
-pref("urlclassifier.downloadAllowTable", "goog-downloadwhite-digest256");
-pref("urlclassifier.downloadBlockTable", "goog-badbinurl-shavar");
+pref("urlclassifier.downloadAllowTable", "goog-downloadwhite-proto");
+pref("urlclassifier.downloadBlockTable", "goog-badbinurl-proto");
 
 // Tables for login reputation
 pref("urlclassifier.passwordAllowTable", "goog-passwordwhite-proto");

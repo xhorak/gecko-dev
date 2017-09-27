@@ -18,7 +18,7 @@ use std::ptr;
 use style::applicable_declarations::ApplicableDeclarationBlock;
 use style::context::{CascadeInputs, QuirksMode, SharedStyleContext, StyleContext};
 use style::context::ThreadLocalStyleContext;
-use style::data::ElementStyles;
+use style::data::{ElementStyles, self};
 use style::dom::{ShowSubtreeData, TElement, TNode};
 use style::driver;
 use style::element_state::ElementState;
@@ -131,7 +131,7 @@ use style::stylesheets::{StylesheetContents, SupportsRule};
 use style::stylesheets::StylesheetLoader as StyleStylesheetLoader;
 use style::stylesheets::keyframes_rule::{Keyframe, KeyframeSelector, KeyframesStepValue};
 use style::stylesheets::supports_rule::parse_condition_or_declaration;
-use style::stylist::{RuleInclusion, Stylist};
+use style::stylist::{add_size_of_ua_cache, RuleInclusion, Stylist};
 use style::thread_state;
 use style::timer::Timer;
 use style::traversal::DomTraversal;
@@ -183,6 +183,12 @@ pub extern "C" fn Servo_Initialize(dummy_url_data: *mut URLExtraData) {
 }
 
 #[no_mangle]
+pub extern "C" fn Servo_InitializeCooperativeThread() {
+    // Pretend that we're a Servo Layout thread to make some assertions happy.
+    thread_state::initialize(thread_state::LAYOUT);
+}
+
+#[no_mangle]
 pub extern "C" fn Servo_Shutdown() {
     // The dummy url will be released after shutdown, so clear the
     // reference to avoid use-after-free.
@@ -229,16 +235,19 @@ fn traverse_subtree(element: GeckoElement,
 
     let global_style_data = &*GLOBAL_STYLE_DATA;
     let guard = global_style_data.shared_lock.read();
-    let shared_style_context = create_shared_context(&global_style_data,
-                                                     &guard,
-                                                     &per_doc_data,
-                                                     traversal_flags,
-                                                     snapshots);
+    let shared_style_context = create_shared_context(
+        &global_style_data,
+        &guard,
+        &per_doc_data,
+        traversal_flags,
+        snapshots,
+    );
 
+    let token = RecalcStyleOnly::pre_traverse(
+        element,
+        &shared_style_context,
+    );
 
-    let token = RecalcStyleOnly::pre_traverse(element,
-                                              &shared_style_context,
-                                              traversal_flags);
     if !token.should_traverse() {
         return;
     }
@@ -253,13 +262,13 @@ fn traverse_subtree(element: GeckoElement,
     };
 
     let traversal = RecalcStyleOnly::new(shared_style_context);
-    driver::traverse_dom(&traversal, element, token, thread_pool);
+    driver::traverse_dom(&traversal, token, thread_pool);
 }
 
 /// Traverses the subtree rooted at `root` for restyling.
 ///
-/// Returns whether a Gecko post-traversal (to perform lazy frame construction,
-/// or consume any RestyleData, or drop any ElementData) is required.
+/// Returns whether the root was restyled. Whether anything else was restyled or
+/// not can be inferred from the dirty bits in the rest of the tree.
 #[no_mangle]
 pub extern "C" fn Servo_TraverseSubtree(
     root: RawGeckoElementBorrowed,
@@ -303,7 +312,9 @@ pub extern "C" fn Servo_TraverseSubtree(
            element.needs_frame(),
            element.borrow_data().unwrap());
 
-    element.needs_post_traversal()
+    let element_was_restyled =
+        element.borrow_data().unwrap().contains_restyle_data();
+    element_was_restyled
 }
 
 /// Checks whether the rule tree has crossed its threshold for unused nodes, and
@@ -836,11 +847,18 @@ pub extern "C" fn Servo_Element_GetPseudoComputedValues(element: RawGeckoElement
 }
 
 #[no_mangle]
-pub extern "C" fn Servo_Element_IsDisplayNone(element: RawGeckoElementBorrowed) -> bool
-{
+pub extern "C" fn Servo_Element_IsDisplayNone(element: RawGeckoElementBorrowed) -> bool {
     let element = GeckoElement(element);
     let data = element.borrow_data().expect("Invoking Servo_Element_IsDisplayNone on unstyled element");
     data.styles.is_display_none()
+}
+
+#[no_mangle]
+pub extern "C" fn Servo_Element_IsPrimaryStyleReusedViaRuleNode(element: RawGeckoElementBorrowed) -> bool {
+    let element = GeckoElement(element);
+    let data = element.borrow_data()
+                      .expect("Invoking Servo_Element_IsPrimaryStyleReusedViaRuleNode on unstyled element");
+    data.flags.contains(data::PRIMARY_STYLE_REUSED_VIA_RULE_NODE)
 }
 
 #[no_mangle]
@@ -1490,7 +1508,7 @@ pub extern "C" fn Servo_StyleRule_SelectorMatchesElement(rule: RawServoStyleRule
         };
 
         let element = GeckoElement(element);
-        let mut ctx = MatchingContext::new(matching_mode, None, element.owner_document_quirks_mode());
+        let mut ctx = MatchingContext::new(matching_mode, None, None, element.owner_document_quirks_mode());
         matches_selector(selector, 0, None, &element, &mut ctx, &mut |_, _| {})
     })
 }
@@ -2205,9 +2223,13 @@ pub extern "C" fn Servo_MatrixTransform_Operate(matrix_operator: MatrixTransform
     };
 
     let output = unsafe { output.as_mut() }.expect("not a valid 'output' matrix");
-    if let Ok(result) =  result {
+    if let Ok(result) = result {
         *output = result.into();
-    };
+    } else if progress < 0.5 {
+        *output = from.clone().into();
+    } else {
+        *output = to.clone().into();
+    }
 }
 
 #[no_mangle]
@@ -3596,10 +3618,9 @@ pub extern "C" fn Servo_StyleSet_GetKeyframesForName(raw_data: RawServoStyleSetB
             },
             KeyframesStepValue::Declarations { ref block } => {
                 let guard = block.read_with(&guard);
-                // Filter out non-animatable properties.
+                // Filter out non-animatable properties and properties with !important.
                 let animatable =
-                    guard.declarations()
-                         .iter()
+                    guard.normal_declaration_iter()
                          .filter(|declaration| declaration.is_animatable());
 
                 for declaration in animatable {
@@ -3765,7 +3786,20 @@ pub extern "C" fn Servo_StyleSet_AddSizeOfExcludingThis(
                                        malloc_enclosing_size_of.unwrap(),
                                        None);
     let sizes = unsafe { sizes.as_mut() }.unwrap();
-    data.add_size_of_children(&mut ops, sizes);
+    data.add_size_of(&mut ops, sizes);
+}
+
+#[no_mangle]
+pub extern "C" fn Servo_UACache_AddSizeOf(
+    malloc_size_of: GeckoMallocSizeOf,
+    malloc_enclosing_size_of: GeckoMallocSizeOf,
+    sizes: *mut ServoStyleSetSizes
+) {
+    let mut ops = MallocSizeOfOps::new(malloc_size_of.unwrap(),
+                                       malloc_enclosing_size_of.unwrap(),
+                                       None);
+    let sizes = unsafe { sizes.as_mut() }.unwrap();
+    add_size_of_ua_cache(&mut ops, sizes);
 }
 
 #[no_mangle]

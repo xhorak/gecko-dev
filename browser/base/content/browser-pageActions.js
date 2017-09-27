@@ -241,6 +241,7 @@ var BrowserPageActions = {
       if (iframeNode) {
         action.onIframeHiding(iframeNode, panelNode);
       }
+      anchorNode.removeAttribute("open");
     }, { once: true });
 
     if (panelViewNode) {
@@ -252,6 +253,7 @@ var BrowserPageActions = {
     // panel.
     this.panelNode.hidePopup();
     panelNode.openPopup(anchorNode, "bottomcenter topright");
+    anchorNode.setAttribute("open", "true");
 
     if (iframeNode) {
       action.onIframeShown(iframeNode, panelNode);
@@ -260,11 +262,20 @@ var BrowserPageActions = {
     return panelNode;
   },
 
+  /**
+   * Returns the node in the urlbar to which popups for the given action should
+   * be anchored.  If the action is null, a sensible anchor is returned.
+   *
+   * @param  action (PageActions.Action, optional)
+   *         The action you want to anchor.
+   * @return (DOM node, nonnull) The node to which the action should be
+   *         anchored.
+   */
   panelAnchorNodeForAction(action) {
     // Try each of the following nodes in order, using the first that's visible.
     let potentialAnchorNodeIDs = [
-      action.anchorIDOverride || null,
-      this._urlbarButtonNodeIDForActionID(action.id),
+      action && action.anchorIDOverride,
+      action && this._urlbarButtonNodeIDForActionID(action.id),
       this.mainButtonNode.id,
       "identity-icon",
     ];
@@ -281,7 +292,8 @@ var BrowserPageActions = {
         }
       }
     }
-    throw new Error(`PageActions: No anchor node for '${action.id}'`);
+    let id = action ? action.id : "<no action>";
+    throw new Error(`PageActions: No anchor node for ${id}`);
   },
 
   get activatedActionPanelNode() {
@@ -593,6 +605,10 @@ var BrowserPageActions = {
     }
 
     this.panelNode.hidden = false;
+    this.panelNode.addEventListener("popuphiding", () => {
+      this.mainButtonNode.removeAttribute("open");
+    }, {once: true});
+    this.mainButtonNode.setAttribute("open", "true");
     this.panelNode.openPopup(this.mainButtonNode, {
       position: "bottomcenter topright",
       triggerEvent: event,

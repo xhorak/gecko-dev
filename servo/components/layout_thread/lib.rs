@@ -461,7 +461,8 @@ impl LayoutThread {
             ScaleFactor::new(opts::get().device_pixels_per_px.unwrap_or(1.0)));
 
         let configuration =
-            rayon::Configuration::new().num_threads(layout_threads);
+            rayon::Configuration::new().num_threads(layout_threads)
+                                       .start_handler(|_| thread_state::initialize_layout_worker_thread());
         let parallel_traversal = if layout_threads > 1 {
             Some(rayon::ThreadPool::new(configuration).expect("ThreadPool creation failed"))
         } else {
@@ -1267,15 +1268,11 @@ impl LayoutThread {
             None
         };
 
-        // NB: Type inference falls apart here for some reason, so we need to be very verbose. :-(
         let traversal = RecalcStyleAndConstructFlows::new(layout_context);
         let token = {
-            let context = <RecalcStyleAndConstructFlows as
-                           DomTraversal<ServoLayoutElement>>::shared_context(&traversal);
-            <RecalcStyleAndConstructFlows as
-             DomTraversal<ServoLayoutElement>>::pre_traverse(element,
-                                                             context,
-                                                             TraversalFlags::empty())
+            let shared =
+                <RecalcStyleAndConstructFlows as DomTraversal<ServoLayoutElement>>::shared_context(&traversal);
+            RecalcStyleAndConstructFlows::pre_traverse(element, shared)
         };
 
         if token.should_traverse() {
@@ -1286,7 +1283,10 @@ impl LayoutThread {
                     || {
                 // Perform CSS selector matching and flow construction.
                 driver::traverse_dom::<ServoLayoutElement, RecalcStyleAndConstructFlows>(
-                    &traversal, element, token, thread_pool);
+                    &traversal,
+                    token,
+                    thread_pool,
+                );
             });
             // TODO(pcwalton): Measure energy usage of text shaping, perhaps?
             let text_shaping_time =

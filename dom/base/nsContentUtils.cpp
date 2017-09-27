@@ -50,7 +50,6 @@
 #include "mozilla/dom/HTMLInputElement.h"
 #include "mozilla/dom/HTMLTemplateElement.h"
 #include "mozilla/dom/HTMLContentElement.h"
-#include "mozilla/dom/HTMLShadowElement.h"
 #include "mozilla/dom/IPCBlobUtils.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/ScriptSettings.h"
@@ -1635,7 +1634,7 @@ nsContentUtils::SandboxFlagsToString(uint32_t aFlags, nsAString& aString)
 #define SANDBOX_KEYWORD(string, atom, flags)                \
   if (!(aFlags & (flags))) {                                \
     if (!aString.IsEmpty()) {                               \
-      aString.Append(NS_LITERAL_STRING(" "));               \
+      aString.AppendLiteral(u" ");                          \
     }                                                       \
     aString.Append(nsDependentAtomString(nsGkAtoms::atom)); \
   }
@@ -3714,7 +3713,9 @@ nsContentUtils::IsImageInCache(nsIURI* aURI, nsIDocument* aDocument)
 nsresult
 nsContentUtils::LoadImage(nsIURI* aURI, nsINode* aContext,
                           nsIDocument* aLoadingDocument,
-                          nsIPrincipal* aLoadingPrincipal, nsIURI* aReferrer,
+                          nsIPrincipal* aLoadingPrincipal,
+                          uint64_t aRequestContextID,
+                          nsIURI* aReferrer,
                           net::ReferrerPolicy aReferrerPolicy,
                           imgINotificationObserver* aObserver, int32_t aLoadFlags,
                           const nsAString& initiatorType,
@@ -3751,6 +3752,7 @@ nsContentUtils::LoadImage(nsIURI* aURI, nsINode* aContext,
                               aReferrer,            /* referrer */
                               aReferrerPolicy,      /* referrer policy */
                               aLoadingPrincipal,    /* loading principal */
+                              aRequestContextID,    /* request context ID */
                               loadGroup,            /* loadgroup */
                               aObserver,            /* imgINotificationObserver */
                               aContext,             /* loading context */
@@ -5547,7 +5549,8 @@ nsContentUtils::TriggerLink(nsIContent *aContent, nsPresContext *aPresContext,
 
     handler->OnLinkClick(aContent, aLinkURI,
                          fileName.IsVoid() ? aTargetSpec.get() : EmptyString().get(),
-                         fileName, nullptr, nullptr, aIsTrusted, aContent->NodePrincipal());
+                         fileName, nullptr, -1, nullptr, aIsTrusted,
+                         aContent->NodePrincipal());
   }
 }
 
@@ -7189,7 +7192,7 @@ nsContentUtils::IsPatternMatching(nsAString& aValue, nsAString& aPattern,
   JSAutoCompartment ac(cx, xpc::UnprivilegedJunkScope());
 
   // The pattern has to match the entire value.
-  aPattern.Insert(NS_LITERAL_STRING("^(?:"), 0);
+  aPattern.InsertLiteral(u"^(?:", 0);
   aPattern.AppendLiteral(")$");
 
   JS::Rooted<JSObject*> re(cx,
@@ -7561,20 +7564,6 @@ nsContentUtils::HasDistributedChildren(nsIContent* aContent)
     // Children of a shadow root host are distributed
     // to content insertion points in the shadow root.
     return true;
-  }
-
-  ShadowRoot* shadow = ShadowRoot::FromNode(aContent);
-  if (shadow) {
-    // Children of a shadow root are distributed to
-    // the shadow insertion point of the younger shadow root.
-    return shadow->GetYoungerShadowRoot();
-  }
-
-  HTMLShadowElement* shadowEl = HTMLShadowElement::FromContent(aContent);
-  if (shadowEl && shadowEl->IsInsertionPoint()) {
-    // Children of a shadow insertion points are distributed
-    // to the insertion points in the older shadow root.
-    return shadowEl->GetOlderShadowRoot();
   }
 
   HTMLContentElement* contentEl = HTMLContentElement::FromContent(aContent);
@@ -9062,6 +9051,20 @@ nsContentUtils::StorageAllowedForWindow(nsPIDOMWindowInner* aWindow)
 
 // static, public
 nsContentUtils::StorageAccess
+nsContentUtils::StorageAllowedForDocument(nsIDocument* aDoc)
+{
+  MOZ_ASSERT(aDoc);
+
+  if (nsPIDOMWindowInner* inner = aDoc->GetInnerWindow()) {
+    nsCOMPtr<nsIPrincipal> principal = aDoc->NodePrincipal();
+    return InternalStorageAllowedForPrincipal(principal, inner);
+  }
+
+  return StorageAccess::eDeny;
+}
+
+// static, public
+nsContentUtils::StorageAccess
 nsContentUtils::StorageAllowedForPrincipal(nsIPrincipal* aPrincipal)
 {
   return InternalStorageAllowedForPrincipal(aPrincipal, nullptr);
@@ -9139,7 +9142,7 @@ nsContentUtils::InternalStorageAllowedForPrincipal(nsIPrincipal* aPrincipal,
   if (aWindow) {
     // If the document is sandboxed, then it is not permitted to use storage
     nsIDocument* document = aWindow->GetExtantDoc();
-    if (document->GetSandboxFlags() & SANDBOXED_ORIGIN) {
+    if (document && document->GetSandboxFlags() & SANDBOXED_ORIGIN) {
       return StorageAccess::eDeny;
     }
 
@@ -10119,13 +10122,8 @@ nsContentUtils::GetElementDefinitionIfObservingAttr(Element* aCustomElement,
                                                     nsIAtom* aExtensionType,
                                                     nsIAtom* aAttrName)
 {
-  nsString extType = nsDependentAtomString(aExtensionType);
-  NodeInfo *ni = aCustomElement->NodeInfo();
-
   CustomElementDefinition* definition =
-    LookupCustomElementDefinition(aCustomElement->OwnerDoc(), ni->LocalName(),
-                                  ni->NamespaceID(),
-                                  extType.IsEmpty() ? nullptr : &extType);
+    aCustomElement->GetCustomElementDefinition();
 
   // Custom element not defined yet or attribute is not in the observed
   // attribute list.
@@ -10137,19 +10135,14 @@ nsContentUtils::GetElementDefinitionIfObservingAttr(Element* aCustomElement,
 }
 
 /* static */ void
-nsContentUtils::EnqueueLifecycleCallback(nsIDocument* aDoc,
-                                         nsIDocument::ElementCallbackType aType,
-                                         Element* aCustomElement,
-                                         LifecycleCallbackArgs* aArgs,
-                                         CustomElementDefinition* aDefinition)
+nsContentUtils::SyncInvokeReactions(nsIDocument::ElementCallbackType aType,
+                                    Element* aElement,
+                                    CustomElementDefinition* aDefinition)
 {
-  MOZ_ASSERT(aDoc);
+  MOZ_ASSERT(aElement);
 
-  if (!aDoc->GetDocShell()) {
-    return;
-  }
-
-  nsCOMPtr<nsPIDOMWindowInner> window(aDoc->GetInnerWindow());
+  nsIDocument* doc = aElement->OwnerDoc();
+  nsPIDOMWindowInner* window(doc->GetInnerWindow());
   if (!window) {
     return;
   }
@@ -10159,7 +10152,40 @@ nsContentUtils::EnqueueLifecycleCallback(nsIDocument* aDoc,
     return;
   }
 
-  registry->EnqueueLifecycleCallback(aType, aCustomElement, aArgs, aDefinition);
+  registry->SyncInvokeReactions(aType, aElement, aDefinition);
+}
+
+/* static */ void
+nsContentUtils::EnqueueUpgradeReaction(Element* aElement,
+                                       CustomElementDefinition* aDefinition)
+{
+  MOZ_ASSERT(aElement);
+
+  nsIDocument* doc = aElement->OwnerDoc();
+
+  // No DocGroup means no custom element reactions stack.
+  if (!doc->GetDocGroup()) {
+    return;
+  }
+
+  CustomElementReactionsStack* stack =
+    doc->GetDocGroup()->CustomElementReactionsStack();
+  stack->EnqueueUpgradeReaction(aElement, aDefinition);
+}
+
+/* static */ void
+nsContentUtils::EnqueueLifecycleCallback(nsIDocument::ElementCallbackType aType,
+                                         Element* aCustomElement,
+                                         LifecycleCallbackArgs* aArgs,
+                                         CustomElementDefinition* aDefinition)
+{
+  // No DocGroup means no custom element reactions stack.
+  if (!aCustomElement->OwnerDoc()->GetDocGroup()) {
+    return;
+  }
+
+  CustomElementRegistry::EnqueueLifecycleCallback(aType, aCustomElement, aArgs,
+                                                  aDefinition);
 }
 
 /* static */ void
@@ -10403,35 +10429,70 @@ nsContentUtils::AppendNativeAnonymousChildren(
   }
 }
 
+/* static */ bool
+nsContentUtils::GetLoadingPrincipalForXULNode(nsIContent* aLoadingNode,
+                                              nsIPrincipal** aLoadingPrincipal)
+{
+  MOZ_ASSERT(aLoadingNode);
+  MOZ_ASSERT(aLoadingPrincipal);
+
+  bool result = false;
+  nsCOMPtr<nsIPrincipal> loadingPrincipal = aLoadingNode->NodePrincipal();
+  nsAutoString loadingStr;
+  aLoadingNode->GetAttr(kNameSpaceID_None, nsGkAtoms::loadingprincipal,
+                        loadingStr);
+  if (loadingStr.IsEmpty()) {
+    // Fall back to mContent's principal (SystemPrincipal) if 'loadingprincipal'
+    // isn't specified.
+    loadingPrincipal.forget(aLoadingPrincipal);
+    return result;
+  }
+
+  nsCOMPtr<nsISupports> serializedPrincipal;
+  NS_DeserializeObject(NS_ConvertUTF16toUTF8(loadingStr),
+                       getter_AddRefs(serializedPrincipal));
+  loadingPrincipal = do_QueryInterface(serializedPrincipal);
+  if (loadingPrincipal) {
+    // We only allow specifying loadingprincipal attribute on a node loaded by
+    // SystemPrincipal.
+    MOZ_ASSERT(nsContentUtils::IsSystemPrincipal(aLoadingNode->NodePrincipal()),
+               "aLoadingNode Should be loaded with SystemPrincipal");
+
+    result = true;
+  } else {
+    // Fallback if the deserialization is failed.
+    loadingPrincipal = aLoadingNode->NodePrincipal();
+  }
+
+  loadingPrincipal.forget(aLoadingPrincipal);
+  return result;
+}
 
 /* static */ void
 nsContentUtils::GetContentPolicyTypeForUIImageLoading(nsIContent* aLoadingNode,
                                                       nsIPrincipal** aLoadingPrincipal,
-                                                      nsContentPolicyType& aContentPolicyType)
+                                                      nsContentPolicyType& aContentPolicyType,
+                                                      uint64_t* aRequestContextID)
 {
-  // Use the serialized loadingPrincipal from the image element. Fall back
-  // to mContent's principal (SystemPrincipal) if not available.
-  aContentPolicyType = nsIContentPolicy::TYPE_INTERNAL_IMAGE;
-  nsCOMPtr<nsIPrincipal> loadingPrincipal = aLoadingNode->NodePrincipal();
-  nsAutoString imageLoadingPrincipal;
-  aLoadingNode->GetAttr(kNameSpaceID_None, nsGkAtoms::loadingprincipal,
-                        imageLoadingPrincipal);
-  if (!imageLoadingPrincipal.IsEmpty()) {
-    nsCOMPtr<nsISupports> serializedPrincipal;
-    NS_DeserializeObject(NS_ConvertUTF16toUTF8(imageLoadingPrincipal),
-                         getter_AddRefs(serializedPrincipal));
-    loadingPrincipal = do_QueryInterface(serializedPrincipal);
+  MOZ_ASSERT(aRequestContextID);
 
-    if (loadingPrincipal) {
-      // Set the content policy type to TYPE_INTERNAL_IMAGE_FAVICON for
-      // indicating it's a favicon loading.
-      aContentPolicyType = nsIContentPolicy::TYPE_INTERNAL_IMAGE_FAVICON;
-    } else {
-      // Fallback if the deserialization is failed.
-      loadingPrincipal = aLoadingNode->NodePrincipal();
-    }
+  bool result = GetLoadingPrincipalForXULNode(aLoadingNode, aLoadingPrincipal);
+  if (result) {
+    // Set the content policy type to TYPE_INTERNAL_IMAGE_FAVICON for
+    // indicating it's a favicon loading.
+    aContentPolicyType = nsIContentPolicy::TYPE_INTERNAL_IMAGE_FAVICON;
+
+    nsAutoString requestContextID;
+    aLoadingNode->GetAttr(kNameSpaceID_None, nsGkAtoms::requestcontextid,
+                          requestContextID);
+    nsresult rv;
+    int64_t val  = requestContextID.ToInteger64(&rv);
+    *aRequestContextID = NS_SUCCEEDED(rv)
+      ? val
+      : 0;
+  } else {
+    aContentPolicyType = nsIContentPolicy::TYPE_INTERNAL_IMAGE;
   }
-  loadingPrincipal.forget(aLoadingPrincipal);
 }
 
 /* static */ nsresult

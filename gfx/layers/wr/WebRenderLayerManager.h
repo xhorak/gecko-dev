@@ -6,6 +6,7 @@
 #ifndef GFX_WEBRENDERLAYERMANAGER_H
 #define GFX_WEBRENDERLAYERMANAGER_H
 
+#include <unordered_set>
 #include <vector>
 
 #include "gfxPrefs.h"
@@ -39,6 +40,7 @@ class WebRenderParentCommand;
 class WebRenderLayerManager final : public LayerManager
 {
   typedef nsTArray<RefPtr<Layer> > LayerRefArray;
+  typedef nsTHashtable<nsRefPtrHashKey<WebRenderUserData>> WebRenderUserDataRefTable;
 
 public:
   explicit WebRenderLayerManager(nsIWidget* aWidget);
@@ -64,11 +66,13 @@ public:
   Maybe<wr::ImageKey> CreateImageKey(nsDisplayItem* aItem,
                                      ImageContainer* aContainer,
                                      mozilla::wr::DisplayListBuilder& aBuilder,
+                                     mozilla::wr::IpcResourceUpdateQueue& aResources,
                                      const StackingContextHelper& aSc,
                                      gfx::IntSize& aSize);
   bool PushImage(nsDisplayItem* aItem,
                  ImageContainer* aContainer,
                  mozilla::wr::DisplayListBuilder& aBuilder,
+                 mozilla::wr::IpcResourceUpdateQueue& aResources,
                  const StackingContextHelper& aSc,
                  const LayerRect& aRect);
 
@@ -168,8 +172,10 @@ public:
   void DiscardImages();
   void DiscardLocalImages();
 
-  // Before destroying a layer with animations, add its compositorAnimationsId
-  // to a list of ids that will be discarded on the next transaction
+  // Methods to manage the compositor animation ids. Active animations are still
+  // going, and when they end we discard them and remove them from the active
+  // list.
+  void AddActiveCompositorAnimationId(uint64_t aId);
   void AddCompositorAnimationsIdForDiscard(uint64_t aId);
   void DiscardCompositorAnimations();
 
@@ -215,7 +221,12 @@ public:
       frame->GetProperty(nsIFrame::WebRenderUserDataProperty());
     RefPtr<WebRenderUserData>& data = userDataTable->GetOrInsert(aItem->GetPerFrameKey());
     if (!data || (data->GetType() != T::Type()) || !data->IsDataValid(this)) {
-      data = new T(this);
+      // To recreate a new user data, we should remove the data from the table first.
+      if (data) {
+        data->RemoveFromTable();
+      }
+      data = new T(this, aItem, &mWebRenderUserDatas);
+      mWebRenderUserDatas.PutEntry(data);
       if (aOutIsRecycled) {
         *aOutIsRecycled = false;
       }
@@ -223,6 +234,10 @@ public:
 
     MOZ_ASSERT(data);
     MOZ_ASSERT(data->GetType() == T::Type());
+
+    // Mark the data as being used. We will remove unused user data in the end of EndTransaction.
+    data->SetUsed(true);
+
     if (T::Type() == WebRenderUserData::UserDataType::eCanvas) {
       mLastCanvasDatas.PutEntry(data->AsCanvasData());
     }
@@ -231,6 +246,7 @@ public:
   }
 
   bool ShouldNotifyInvalidation() const { return mShouldNotifyInvalidation; }
+  void SetNotifyInvalidation(bool aShouldNotifyInvalidation) { mShouldNotifyInvalidation = aShouldNotifyInvalidation; }
 
 private:
   /**
@@ -247,6 +263,33 @@ private:
                               nsDisplayList* aDisplayList = nullptr,
                               nsDisplayListBuilder* aDisplayListBuilder = nullptr);
 
+  void RemoveUnusedAndResetWebRenderUserData()
+  {
+    for (auto iter = mWebRenderUserDatas.Iter(); !iter.Done(); iter.Next()) {
+      WebRenderUserData* data = iter.Get()->GetKey();
+      if (!data->IsUsed()) {
+        nsIFrame* frame = data->GetFrame();
+
+        MOZ_ASSERT(frame->HasProperty(nsIFrame::WebRenderUserDataProperty()));
+
+        nsIFrame::WebRenderUserDataTable* userDataTable =
+          frame->GetProperty(nsIFrame::WebRenderUserDataProperty());
+
+        MOZ_ASSERT(userDataTable->Count());
+
+        userDataTable->Remove(data->GetDisplayItemKey());
+
+        if (!userDataTable->Count()) {
+          frame->RemoveProperty(nsIFrame::WebRenderUserDataProperty());
+        }
+        iter.Remove();
+        continue;
+      }
+
+      data->SetUsed(false);
+    }
+  }
+
 private:
   nsIWidget* MOZ_NON_OWNING_REF mWidget;
   nsTArray<wr::ImageKey> mImageKeysToDelete;
@@ -255,6 +298,12 @@ private:
   // of poor texture cache usage, but also because images end up deleted before
   // they are used. This should hopfully be temporary.
   nsTArray<wr::ImageKey> mImageKeysToDeleteLater;
+
+  // Set of compositor animation ids for which there are active animations (as
+  // of the last transaction) on the compositor side.
+  std::unordered_set<uint64_t> mActiveCompositorAnimationIds;
+  // Compositor animation ids for animations that are done now and that we want
+  // the compositor to discard information for.
   nsTArray<uint64_t> mDiscardedCompositorAnimationsIds;
 
   /* PaintedLayer callbacks; valid at the end of a transaciton,
@@ -338,6 +387,8 @@ private:
   // True if the layers-free transaction has invalidation region and then
   // we should send notification after EndTransaction
   bool mShouldNotifyInvalidation;
+
+  WebRenderUserDataRefTable mWebRenderUserDatas;
 };
 
 } // namespace layers

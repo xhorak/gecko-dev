@@ -975,21 +975,14 @@
         <parameter name="aTab"/>
         <parameter name="aURI"/>
         <parameter name="aLoadingPrincipal"/>
+        <parameter name="aRequestContextID"/>
         <body>
           <![CDATA[
             let browser = this.getBrowserForTab(aTab);
             browser.mIconURL = aURI instanceof Ci.nsIURI ? aURI.spec : aURI;
-            let loadingPrincipal = aLoadingPrincipal
-              ? aLoadingPrincipal
-              : Services.scriptSecurityManager.getSystemPrincipal();
-
-            if (aURI) {
-              if (!(aURI instanceof Ci.nsIURI)) {
-                aURI = makeURI(aURI);
-              }
-              PlacesUIUtils.loadFavicon(browser, loadingPrincipal, aURI);
-            }
-
+            let loadingPrincipal = aLoadingPrincipal ||
+                                   Services.scriptSecurityManager.getSystemPrincipal();
+            let requestContextID = aRequestContextID || 0;
             let sizedIconUrl = browser.mIconURL || "";
             if (sizedIconUrl != aTab.getAttribute("image")) {
               if (sizedIconUrl) {
@@ -997,6 +990,7 @@
                     !browser.mIconLoadingPrincipal.equals(loadingPrincipal)) {
                   aTab.setAttribute("iconLoadingPrincipal",
                     this.serializationHelper.serializeToString(loadingPrincipal));
+                  aTab.setAttribute("requestcontextid", requestContextID);
                   browser.mIconLoadingPrincipal = loadingPrincipal;
                 }
                 aTab.setAttribute("image", sizedIconUrl);
@@ -1074,7 +1068,7 @@
               if (!this.isFailedIcon(url))
                 icon = url;
             }
-            this.setIcon(aTab, icon, browser.contentPrincipal);
+            this.setIcon(aTab, icon, browser.contentPrincipal, browser.contentRequestContextID);
           ]]>
         </body>
       </method>
@@ -1852,12 +1846,8 @@
               this.moveTabTo(tab, ++tabNum);
           }
 
-          if (!aLoadInBackground) {
-            if (firstTabAdded) {
-              // .selectedTab setter focuses the content area
-              this.selectedTab = firstTabAdded;
-            } else
-              this.selectedBrowser.focus();
+          if (firstTabAdded && !aLoadInBackground) {
+            this.selectedTab = firstTabAdded;
           }
         ]]></body>
       </method>
@@ -3503,7 +3493,7 @@
               // Workarounds for bug 458697
               // Icon might have been set on DOMLinkAdded, don't override that.
               if (!ourBrowser.mIconURL && otherBrowser.mIconURL)
-                this.setIcon(aOurTab, otherBrowser.mIconURL, otherBrowser.contentPrincipal);
+                this.setIcon(aOurTab, otherBrowser.mIconURL, otherBrowser.contentPrincipal, otherBrowser.contentRequestContextID);
               var isBusy = aOtherTab.hasAttribute("busy");
               if (isBusy) {
                 aOurTab.setAttribute("busy", "true");
@@ -6084,7 +6074,7 @@
           }
 
           tab.removeAttribute("soundplaying");
-          this.setIcon(tab, icon, browser.contentPrincipal);
+          this.setIcon(tab, icon, browser.contentPrincipal, browser.contentRequestContextID);
         ]]>
       </handler>
       <handler event="DOMAudioPlaybackStarted">
@@ -7663,7 +7653,7 @@
                     anonid="tab-throbber"
                     class="tab-throbber"
                     layer="true"/>
-          <xul:image xbl:inherits="src=image,loadingprincipal=iconLoadingPrincipal,fadein,pinned,selected=visuallyselected,busy,crashed,sharing"
+          <xul:image xbl:inherits="src=image,loadingprincipal=iconLoadingPrincipal,requestcontextid,fadein,pinned,selected=visuallyselected,busy,crashed,sharing"
                      anonid="tab-icon-image"
                      class="tab-icon-image"
                      validate="never"

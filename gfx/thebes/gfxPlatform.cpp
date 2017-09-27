@@ -608,11 +608,14 @@ WebRenderDebugPrefChangeCallback(const char* aPrefName, void*)
   if (Preferences::GetBool(WR_DEBUG_PREF".profiler", false)) {
     flags |= (1 << 0);
   }
-  if (Preferences::GetBool(WR_DEBUG_PREF".texture-cache", false)) {
+  if (Preferences::GetBool(WR_DEBUG_PREF".render-targets", false)) {
     flags |= (1 << 1);
   }
-  if (Preferences::GetBool(WR_DEBUG_PREF".render-targets", false)) {
+  if (Preferences::GetBool(WR_DEBUG_PREF".texture-cache", false)) {
     flags |= (1 << 2);
+  }
+  if (Preferences::GetBool(WR_DEBUG_PREF".alpha-primitives", false)) {
+    flags |= (1 << 3);
   }
 
   gfx::gfxVars::SetWebRenderDebugFlags(flags);
@@ -2539,6 +2542,13 @@ gfxPlatform::InitWebRenderConfig()
       gfxVars::SetUseWebRenderANGLE(gfxConfig::IsEnabled(Feature::WEBRENDER));
     }
   }
+#endif
+
+#ifdef MOZ_WIDGET_ANDROID
+  featureWebRender.ForceDisable(
+    FeatureStatus::Unavailable,
+    "WebRender not ready for use on Android",
+    NS_LITERAL_CSTRING("FEATURE_FAILURE_ANDROID"));
 #endif
 
   // gfxFeature is not usable in the GPU process, so we use gfxVars to transmit this feature

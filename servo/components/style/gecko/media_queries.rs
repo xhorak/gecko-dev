@@ -78,7 +78,7 @@ impl Device {
             pres_context: pres_context,
             default_values: ComputedValues::default_values(unsafe { &*pres_context }),
             // FIXME(bz): Seems dubious?
-            root_font_size: AtomicIsize::new(font_size::get_initial_value().0.to_i32_au() as isize),
+            root_font_size: AtomicIsize::new(font_size::get_initial_value().size().0 as isize),
             body_text_color: AtomicUsize::new(unsafe { &*pres_context }.mDefaultColor as usize),
             used_root_font_size: AtomicBool::new(false),
             used_viewport_size: AtomicBool::new(false),
@@ -695,11 +695,12 @@ impl Expression {
         self.evaluate_against(device, &value, quirks_mode)
     }
 
-    fn evaluate_against(&self,
-                        device: &Device,
-                        actual_value: &MediaExpressionValue,
-                        quirks_mode: QuirksMode)
-                        -> bool {
+    fn evaluate_against(
+        &self,
+        device: &Device,
+        actual_value: &MediaExpressionValue,
+        quirks_mode: QuirksMode,
+    ) -> bool {
         use self::MediaExpressionValue::*;
         use std::cmp::Ordering;
 
@@ -721,8 +722,7 @@ impl Expression {
             font_metrics_provider: &provider,
             cached_system_font: None,
             in_media_query: true,
-            // TODO: pass the correct value here.
-            quirks_mode: quirks_mode,
+            quirks_mode,
             for_smil_animation: false,
             for_non_inherited_property: None,
             rule_cache_conditions: RefCell::new(&mut conditions),

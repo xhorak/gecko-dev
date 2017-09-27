@@ -85,13 +85,18 @@ NS_GetContentList(nsINode* aRootNode,
 
 // Element-specific flags
 enum {
-  // These two bits are shared by Gecko's and Servo's restyle systems for
+  // These four bits are shared by Gecko's and Servo's restyle systems for
   // different purposes. They should not be accessed directly, and access to
   // them should be properly guarded by asserts.
   ELEMENT_SHARED_RESTYLE_BIT_1 = ELEMENT_FLAG_BIT(0),
   ELEMENT_SHARED_RESTYLE_BIT_2 = ELEMENT_FLAG_BIT(1),
   ELEMENT_SHARED_RESTYLE_BIT_3 = ELEMENT_FLAG_BIT(2),
   ELEMENT_SHARED_RESTYLE_BIT_4 = ELEMENT_FLAG_BIT(3),
+
+  ELEMENT_SHARED_RESTYLE_BITS = ELEMENT_SHARED_RESTYLE_BIT_1 |
+                                ELEMENT_SHARED_RESTYLE_BIT_2 |
+                                ELEMENT_SHARED_RESTYLE_BIT_3 |
+                                ELEMENT_SHARED_RESTYLE_BIT_4,
 
   // Whether this node has dirty descendants for Servo's style system.
   ELEMENT_HAS_DIRTY_DESCENDANTS_FOR_SERVO = ELEMENT_SHARED_RESTYLE_BIT_1,
@@ -134,6 +139,11 @@ enum {
   // restyle hint.
   ELEMENT_IS_CONDITIONAL_RESTYLE_ANCESTOR = ELEMENT_FLAG_BIT(4),
 
+  // Set if a child element has later-sibling restyle hint. This is needed for
+  // nsComputedDOMStyle to decide when should we need to flush style (only used
+  // in Gecko).
+  ELEMENT_HAS_CHILD_WITH_LATER_SIBLINGS_HINT = ELEMENT_FLAG_BIT(5),
+
   // Just the HAS_PENDING bits, for convenience
   ELEMENT_PENDING_RESTYLE_FLAGS =
     ELEMENT_HAS_PENDING_RESTYLE |
@@ -148,8 +158,6 @@ enum {
   ELEMENT_ALL_RESTYLE_FLAGS = ELEMENT_PENDING_RESTYLE_FLAGS |
                               ELEMENT_POTENTIAL_RESTYLE_ROOT_FLAGS |
                               ELEMENT_IS_CONDITIONAL_RESTYLE_ANCESTOR,
-
-  // ELEMENT_FLAG_BIT(5) is currently unused
 
   // Remaining bits are for subclasses
   ELEMENT_TYPE_SPECIFIC_BITS_OFFSET = NODE_TYPE_SPECIFIC_BITS_OFFSET + 6
@@ -547,6 +555,22 @@ public:
    * @param aData The custom element data.
    */
   void SetCustomElementData(CustomElementData* aData);
+
+  /**
+   * Gets the custom element definition used by web components custom element.
+   *
+   * @return The custom element definition or null if element is not a custom
+   *         element or custom element is not defined yet.
+   */
+  CustomElementDefinition* GetCustomElementDefinition() const;
+
+  /**
+   * Sets the custom element definition, called when custom element is created
+   * or upgraded.
+   *
+   * @param aDefinition The custom element definition.
+   */
+  void SetCustomElementDefinition(CustomElementDefinition* aDefinition);
 
 protected:
   /**
@@ -1810,7 +1834,8 @@ inline const mozilla::dom::Element* nsINode::AsElement() const
 inline void nsINode::UnsetRestyleFlagsIfGecko()
 {
   if (IsElement() && !AsElement()->IsStyledByServo()) {
-    UnsetFlags(ELEMENT_ALL_RESTYLE_FLAGS);
+    UnsetFlags(ELEMENT_ALL_RESTYLE_FLAGS |
+               ELEMENT_HAS_CHILD_WITH_LATER_SIBLINGS_HINT);
   }
 }
 

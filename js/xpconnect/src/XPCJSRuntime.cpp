@@ -1066,6 +1066,7 @@ XPCJSRuntime::Shutdown(JSContext* cx)
     JS_RemoveFinalizeCallback(cx, FinalizeCallback);
     JS_RemoveWeakPointerZonesCallback(cx, WeakPointerZonesCallback);
     JS_RemoveWeakPointerCompartmentCallback(cx, WeakPointerCompartmentCallback);
+    xpc_DelocalizeRuntime(JS_GetRuntime(cx));
 
     JS::SetGCSliceCallback(cx, mPrevGCSliceCallback);
 
@@ -1729,7 +1730,7 @@ ReportCompartmentStats(const JS::CompartmentStats& cStats,
             // Insert the add-on id as "add-ons/@id@/" after "explicit/" to
             // aggregate add-on compartments.
             static const size_t explicitLength = strlen("explicit/");
-            addonId.Insert(NS_LITERAL_CSTRING("add-ons/"), 0);
+            addonId.InsertLiteral("add-ons/", 0);
             addonId += "/";
             cJSPathPrefix.Insert(addonId, explicitLength);
             cDOMPathPrefix.Insert(addonId, explicitLength);
@@ -2910,7 +2911,6 @@ XPCJSRuntime::Initialize(JSContext* cx)
     JS_SetAccumulateTelemetryCallback(cx, AccumulateTelemetryCallback);
     JS_SetSetUseCounterCallback(cx, SetUseCounterCallback);
     js::SetWindowProxyClass(cx, &OuterWindowProxyClass);
-    js::SetXrayJitInfo(&gXrayJitInfo);
     JS::SetProcessLargeAllocationFailureCallback(OnLargeAllocationFailureCallback);
 
     // The JS engine needs to keep the source code around in order to implement
@@ -2940,6 +2940,8 @@ XPCJSRuntime::Initialize(JSContext* cx)
     RegisterJSMainRuntimeCompartmentsSystemDistinguishedAmount(JSMainRuntimeCompartmentsSystemDistinguishedAmount);
     RegisterJSMainRuntimeCompartmentsUserDistinguishedAmount(JSMainRuntimeCompartmentsUserDistinguishedAmount);
     mozilla::RegisterJSSizeOfTab(JSSizeOfTab);
+
+    xpc_LocalizeRuntime(JS_GetRuntime(cx));
 }
 
 bool
