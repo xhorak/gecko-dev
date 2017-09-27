@@ -1486,8 +1486,8 @@ LayoutDeviceIntRect
 nsWindow::GetScreenBounds()
 {
     LayoutDeviceIntRect rect;
-    if (mIsTopLevel && mContainer) {
-        // use the point including window decorations
+    if (mIsTopLevel && mContainer && !IsClientDecorated()) {
+        // use the point including default Gtk+ window decorations
         gint x, y;
         gdk_window_get_root_origin(gtk_widget_get_window(GTK_WIDGET(mContainer)), &x, &y);
         rect.MoveTo(GdkPointToDevicePixels({ x, y }));
