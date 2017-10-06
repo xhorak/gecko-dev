@@ -2191,6 +2191,12 @@ nsWindow::OnExposeEvent(cairo_t *cr)
         return TRUE;
     }
 
+    // Clip upper part of the mContainer to get visible rounded corners
+    // of GtkHeaderBar which is renderd to mShell.
+    if (mIsCSDEnabled) {
+        ApplyCSDClipping();
+    }
+
     // If this widget uses OMTC...
     if (GetLayerManager()->GetBackendType() == LayersBackend::LAYERS_CLIENT ||
         GetLayerManager()->GetBackendType() == LayersBackend::LAYERS_WR) {
@@ -3725,7 +3731,7 @@ nsWindow::Create(nsIWidget* aParent,
         // When CSD is available we can emulate it for toplevel windows.
         // Content is rendered to mContainer and transparent decorations to mShell.
         if (GetCSDSupportLevel() != CSD_SUPPORT_NONE &&
-                mWindowType == eWindowType_toplevel) {
+            mWindowType == eWindowType_toplevel) {
             int32_t isCSDAvailable = false;
             nsresult rv = LookAndFeel::GetInt(LookAndFeel::eIntID_GTKCSDAvailable,
                                              &isCSDAvailable);
@@ -5692,6 +5698,8 @@ expose_event_decoration_draw_cb(GtkWidget *widget, cairo_t *cr)
           gtk_window_get_size(GTK_WINDOW(widget), &rect.width, &rect.height);
           moz_gtk_window_decoration_paint(cr, &rect);
 
+          rect.height = 40;
+          moz_gtk_header_bar_paint(cr, &rect);
           cairo_restore(cr);
       }
   }
@@ -7139,6 +7147,21 @@ nsWindow::UpdateClientDecorations()
   gtk_widget_set_margin_bottom(GTK_WIDGET(mContainer), mDecorationSize.bottom);
 }
 
+void
+nsWindow::ApplyCSDClipping()
+{
+  if (IsClientDecorated()) {
+      gint top, right, bottom, left;
+      moz_gtk_get_header_bar_border(&top, &right, &bottom, &left);
+      cairo_rectangle_int_t rect = { 0, top, mBounds.width, mBounds.height};
+      cairo_region_t *region = cairo_region_create_rectangle(&rect);
+      gdk_window_shape_combine_region(mGdkWindow, region, 0, 0);
+      cairo_region_destroy(region);
+  } else {
+      gdk_window_shape_combine_region(mGdkWindow, nullptr, 0, 0);
+  }
+}
+
 bool
 nsWindow::CheckResizerEdge(LayoutDeviceIntPoint aPoint, GdkWindowEdge& aOutEdge)
 {
@@ -7153,6 +7176,8 @@ nsWindow::CheckResizerEdge(LayoutDeviceIntPoint aPoint, GdkWindowEdge& aOutEdge)
   int leftDist = aPoint.x;
   int rightDist = mBounds.width - aPoint.x;
   int bottomDist = mBounds.height - aPoint.y;
+
+  //TODO -> wrong sizes
 
   if (leftDist <= resizerSize && topDist <= resizerSize) {
     aOutEdge = GDK_WINDOW_EDGE_NORTH_WEST;

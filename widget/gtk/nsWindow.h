@@ -449,7 +449,7 @@ private:
                                    gint* aRootX, gint* aRootY);
     void               ClearCachedResources();
     nsIWidgetListener* GetListener();
-
+    void               ApplyCSDClipping();
 
     GtkWidget          *mShell;
     MozContainer       *mContainer;
