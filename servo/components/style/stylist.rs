@@ -11,7 +11,7 @@ use dom::TElement;
 use element_state::ElementState;
 use font_metrics::FontMetricsProvider;
 #[cfg(feature = "gecko")]
-use gecko_bindings::structs::{nsIAtom, ServoStyleSetSizes, StyleRuleInclusion};
+use gecko_bindings::structs::{ServoStyleSetSizes, StyleRuleInclusion};
 use hashglobe::FailedAllocationError;
 use invalidation::element::invalidation_map::InvalidationMap;
 use invalidation::media_queries::{EffectiveMediaQueryResults, ToMediaListKey};
@@ -478,12 +478,6 @@ impl Stylist {
             .map(|(d, _)| d.selectors_for_cache_revalidation.len()).sum()
     }
 
-    /// Returns the number of entries in invalidation maps.
-    pub fn num_invalidations(&self) -> usize {
-        self.cascade_data.iter_origins()
-            .map(|(d, _)| d.invalidation_map.len()).sum()
-    }
-
     /// Invokes `f` with the `InvalidationMap` for each origin.
     ///
     /// NOTE(heycam) This might be better as an `iter_invalidation_maps`, once
@@ -893,13 +887,13 @@ impl Stylist {
     ) -> Arc<ComputedValues> {
         // We need to compute visited values if we have visited rules or if our
         // parent has visited values.
-        let visited_values = if inputs.visited_rules.is_some() || parent_style.get_visited_style().is_some() {
-            // Slightly annoying: we know that inputs has either rules or
-            // visited rules, but we can't do inputs.rules() up front because
-            // maybe it just has visited rules, so can't unwrap_or.
+        let visited_values = if inputs.visited_rules.is_some() || parent_style.visited_style().is_some() {
+            // At this point inputs may have visited rules, or rules, or both,
+            // or neither (e.g. if it's a text style it may have neither).  So
+            // we have to be a bit careful here.
             let rule_node = match inputs.visited_rules.as_ref() {
                 Some(rules) => rules,
-                None => inputs.rules.as_ref().unwrap(),
+                None => inputs.rules.as_ref().unwrap_or(self.rule_tree().root()),
             };
             let inherited_style;
             let inherited_style_ignoring_first_line;
@@ -913,11 +907,11 @@ impl Stylist {
                 // We want to use the visited bits (if any) from our parent
                 // style as our parent.
                 inherited_style =
-                    parent_style.get_visited_style().unwrap_or(parent_style);
+                    parent_style.visited_style().unwrap_or(parent_style);
                 inherited_style_ignoring_first_line =
-                    parent_style_ignoring_first_line.get_visited_style().unwrap_or(parent_style_ignoring_first_line);
+                    parent_style_ignoring_first_line.visited_style().unwrap_or(parent_style_ignoring_first_line);
                 layout_parent_style_for_visited =
-                    layout_parent_style.get_visited_style().unwrap_or(layout_parent_style);
+                    layout_parent_style.visited_style().unwrap_or(layout_parent_style);
             }
 
             Some(properties::cascade(
@@ -964,12 +958,6 @@ impl Stylist {
         )
     }
 
-    fn has_rules_for_pseudo(&self, pseudo: &PseudoElement) -> bool {
-        self.cascade_data
-            .iter_origins()
-            .any(|(d, _)| d.has_rules_for_pseudo(pseudo))
-    }
-
     /// Computes the cascade inputs for a lazily-cascaded pseudo-element.
     ///
     /// See the documentation on lazy pseudo-elements in
@@ -987,10 +975,6 @@ impl Stylist {
     {
         let pseudo = pseudo.canonical();
         debug_assert!(pseudo.is_lazy());
-
-        if !self.has_rules_for_pseudo(&pseudo) {
-            return CascadeInputs::default()
-        }
 
         // Apply the selector flags. We should be in sequential mode
         // already, so we can directly apply the parent flags.
@@ -1025,10 +1009,12 @@ impl Stylist {
         let mut inputs = CascadeInputs::default();
         let mut declarations = ApplicableDeclarationList::new();
         let mut matching_context =
-            MatchingContext::new(MatchingMode::ForStatelessPseudoElement,
-                                 None,
-                                 None,
-                                 self.quirks_mode);
+            MatchingContext::new(
+                MatchingMode::ForStatelessPseudoElement,
+                None,
+                None,
+                self.quirks_mode,
+            );
 
         self.push_applicable_declarations(
             element,
@@ -1191,39 +1177,6 @@ impl Stylist {
         self.quirks_mode = quirks_mode;
     }
 
-    /// Returns the applicable CSS declarations for the given element by
-    /// treating us as an XBL stylesheet-only stylist.
-    pub fn push_applicable_declarations_as_xbl_only_stylist<E, V>(
-        &self,
-        element: &E,
-        pseudo_element: Option<&PseudoElement>,
-        applicable_declarations: &mut V
-    )
-    where
-        E: TElement,
-        V: Push<ApplicableDeclarationBlock> + VecLike<ApplicableDeclarationBlock>,
-    {
-        let mut matching_context =
-            MatchingContext::new(MatchingMode::Normal, None, None, self.quirks_mode);
-        let mut dummy_flag_setter = |_: &E, _: ElementSelectorFlags| {};
-
-        let rule_hash_target = element.rule_hash_target();
-
-        // nsXBLPrototypeResources::LoadResources() loads Chrome XBL style
-        // sheets under eAuthorSheetFeatures level.
-        if let Some(map) = self.cascade_data.author.borrow_for_pseudo(pseudo_element) {
-            map.get_all_matching_rules(
-                element,
-                &rule_hash_target,
-                applicable_declarations,
-                &mut matching_context,
-                self.quirks_mode,
-                &mut dummy_flag_setter,
-                CascadeLevel::XBL,
-            );
-        }
-    }
-
     /// Returns the applicable CSS declarations for the given element.
     ///
     /// This corresponds to `ElementRuleCollector` in WebKit.
@@ -1313,11 +1266,21 @@ impl Stylist {
         }
 
         // Step 3b: XBL rules.
-        let cut_off_inheritance =
-            element.get_declarations_from_xbl_bindings(
-                pseudo_element,
-                applicable_declarations,
-            );
+        let cut_off_inheritance = element.each_xbl_stylist(|stylist| {
+            // ServoStyleSet::CreateXBLServoStyleSet() loads XBL style sheets
+            // under eAuthorSheetFeatures level.
+            if let Some(map) = stylist.cascade_data.author.borrow_for_pseudo(pseudo_element) {
+                map.get_all_matching_rules(
+                    element,
+                    &rule_hash_target,
+                    applicable_declarations,
+                    context,
+                    self.quirks_mode,
+                    flags_setter,
+                    CascadeLevel::XBL,
+                );
+            }
+        });
 
         if rule_hash_target.matches_user_and_author_rules() && !only_default_rules {
             // Gecko skips author normal rules if cutting off inheritance.
@@ -1588,7 +1551,7 @@ impl ExtraStyleData {
         guard: &SharedRwLockReadGuard,
         rule: &Arc<Locked<CounterStyleRule>>,
     ) {
-        let name = rule.read_with(guard).mName.raw::<nsIAtom>().into();
+        let name = rule.read_with(guard).mName.mRawPtr.into();
         self.counter_styles.insert(name, rule.clone());
     }
 
@@ -1901,6 +1864,32 @@ impl CascadeData {
         }
     }
 
+    #[cfg(feature = "gecko")]
+    fn begin_mutation(&mut self, rebuild_kind: &SheetRebuildKind) {
+        self.element_map.begin_mutation();
+        self.pseudos_map.for_each(|m| m.begin_mutation());
+        if rebuild_kind.should_rebuild_invalidation() {
+            self.invalidation_map.begin_mutation();
+            self.selectors_for_cache_revalidation.begin_mutation();
+        }
+    }
+
+    #[cfg(feature = "servo")]
+    fn begin_mutation(&mut self, _: &SheetRebuildKind) {}
+
+    #[cfg(feature = "gecko")]
+    fn end_mutation(&mut self, rebuild_kind: &SheetRebuildKind) {
+        self.element_map.end_mutation();
+        self.pseudos_map.for_each(|m| m.end_mutation());
+        if rebuild_kind.should_rebuild_invalidation() {
+            self.invalidation_map.end_mutation();
+            self.selectors_for_cache_revalidation.end_mutation();
+        }
+    }
+
+    #[cfg(feature = "servo")]
+    fn end_mutation(&mut self, _: &SheetRebuildKind) {}
+
     /// Collects all the applicable media query results into `results`.
     ///
     /// This duplicates part of the logic in `add_stylesheet`, which is
@@ -1964,6 +1953,7 @@ impl CascadeData {
             self.effective_media_query_results.saw_effective(stylesheet);
         }
 
+        self.begin_mutation(&rebuild_kind);
         for rule in stylesheet.effective_rules(device, guard) {
             match *rule {
                 CssRule::Style(ref locked) => {
@@ -2000,8 +1990,11 @@ impl CascadeData {
                             None => &mut self.element_map,
                             Some(pseudo) => {
                                 self.pseudos_map
-                                    .get_or_insert_with(&pseudo.canonical(), || Box::new(SelectorMap::new()))
-                                    .expect("Unexpected tree pseudo-element?")
+                                    .get_or_insert_with(&pseudo.canonical(), || {
+                                        let mut map = Box::new(SelectorMap::new());
+                                        map.begin_mutation();
+                                        map
+                                    }).expect("Unexpected tree pseudo-element?")
                             }
                         };
 
@@ -2095,6 +2088,7 @@ impl CascadeData {
                 _ => {}
             }
         }
+        self.end_mutation(&rebuild_kind);
 
         Ok(())
     }
@@ -2193,10 +2187,6 @@ impl CascadeData {
             Some(pseudo) => self.pseudos_map.get(&pseudo.canonical()).map(|p| &**p),
             None => Some(&self.element_map),
         }
-    }
-
-    fn has_rules_for_pseudo(&self, pseudo: &PseudoElement) -> bool {
-        self.pseudos_map.get(pseudo).is_some()
     }
 
     /// Clears the cascade data, but not the invalidation data.

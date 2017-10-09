@@ -274,7 +274,7 @@ void
 nsSHEntryShared::AttributeWillChange(nsIDocument* aDocument,
                                      dom::Element* aContent,
                                      int32_t aNameSpaceID,
-                                     nsIAtom* aAttribute,
+                                     nsAtom* aAttribute,
                                      int32_t aModType,
                                      const nsAttrValue* aNewValue)
 {
@@ -291,7 +291,7 @@ void
 nsSHEntryShared::AttributeChanged(nsIDocument* aDocument,
                                   dom::Element* aElement,
                                   int32_t aNameSpaceID,
-                                  nsIAtom* aAttribute,
+                                  nsAtom* aAttribute,
                                   int32_t aModType,
                                   const nsAttrValue* aOldValue)
 {
@@ -301,8 +301,7 @@ nsSHEntryShared::AttributeChanged(nsIDocument* aDocument,
 void
 nsSHEntryShared::ContentAppended(nsIDocument* aDocument,
                                  nsIContent* aContainer,
-                                 nsIContent* aFirstNewContent,
-                                 int32_t /* unused */)
+                                 nsIContent* aFirstNewContent)
 {
   RemoveFromBFCacheAsync();
 }
@@ -310,8 +309,7 @@ nsSHEntryShared::ContentAppended(nsIDocument* aDocument,
 void
 nsSHEntryShared::ContentInserted(nsIDocument* aDocument,
                                  nsIContent* aContainer,
-                                 nsIContent* aChild,
-                                 int32_t /* unused */)
+                                 nsIContent* aChild)
 {
   RemoveFromBFCacheAsync();
 }
@@ -320,7 +318,6 @@ void
 nsSHEntryShared::ContentRemoved(nsIDocument* aDocument,
                                 nsIContent* aContainer,
                                 nsIContent* aChild,
-                                int32_t aIndexInContainer,
                                 nsIContent* aPreviousSibling)
 {
   RemoveFromBFCacheAsync();

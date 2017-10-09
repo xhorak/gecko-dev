@@ -571,7 +571,9 @@ protected:
   // the HTML file.
   nsString                          mInitiatorType;
   // Number of redirects that has occurred.
-  int16_t                           mRedirectCount;
+  int8_t                            mRedirectCount;
+  // Number of internal redirects that has occurred.
+  int8_t                            mInternalRedirectCount;
   // A time value equal to the starting time of the fetch that initiates the
   // redirect.
   mozilla::TimeStamp                mRedirectStartTimeStamp;
@@ -664,7 +666,7 @@ protected:
   // Classified channel's matched information
   nsCString mMatchedList;
   nsCString mMatchedProvider;
-  nsCString mMatchedPrefix;
+  nsCString mMatchedFullHash;
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(HttpBaseChannel, HTTP_BASE_CHANNEL_IID)

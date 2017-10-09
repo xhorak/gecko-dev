@@ -45,17 +45,12 @@
 #include "nsIDOMFormData.h"
 #include "nsIDOMGeoPositionError.h"
 #include "nsIDOMHistory.h"
-#include "nsIDOMHTMLAreaElement.h"
 #include "nsIDOMHTMLBaseElement.h"
-#include "nsIDOMHTMLButtonElement.h"
-#include "nsIDOMHTMLCanvasElement.h"
 #include "nsIDOMHTMLCollection.h"
 #include "nsIDOMHTMLDocument.h"
 #include "nsIDOMHTMLElement.h"
 #include "nsIDOMHTMLFormElement.h"
-#include "nsIDOMHTMLFrameElement.h"
 #include "nsIDOMHTMLHtmlElement.h"
-#include "nsIDOMHTMLIFrameElement.h"
 #include "nsIDOMHTMLImageElement.h"
 #include "nsIDOMHTMLInputElement.h"
 #include "nsIDOMHTMLLinkElement.h"
@@ -157,15 +152,12 @@
 #include "mozilla/dom/HTMLAreaElementBinding.h"
 #include "mozilla/dom/HTMLBaseElementBinding.h"
 #include "mozilla/dom/HTMLButtonElementBinding.h"
-#include "mozilla/dom/HTMLCanvasElementBinding.h"
 #include "mozilla/dom/HTMLCollectionBinding.h"
 #include "mozilla/dom/HTMLDocumentBinding.h"
 #include "mozilla/dom/HTMLElementBinding.h"
 #include "mozilla/dom/HTMLFormElementBinding.h"
-#include "mozilla/dom/HTMLFrameElementBinding.h"
 #include "mozilla/dom/HTMLFrameSetElementBinding.h"
 #include "mozilla/dom/HTMLHtmlElementBinding.h"
-#include "mozilla/dom/HTMLIFrameElementBinding.h"
 #include "mozilla/dom/HTMLImageElementBinding.h"
 #include "mozilla/dom/HTMLInputElementBinding.h"
 #include "mozilla/dom/HTMLLinkElementBinding.h"
@@ -320,17 +312,12 @@ const ComponentsInterfaceShimEntry kComponentsInterfaceShimMap[] =
   DEFINE_SHIM_WITH_CUSTOM_INTERFACE(nsIFrameLoader, FrameLoader),
   DEFINE_SHIM_WITH_CUSTOM_INTERFACE(nsIDOMGeoPositionError, PositionError),
   DEFINE_SHIM(History),
-  DEFINE_SHIM(HTMLAreaElement),
   DEFINE_SHIM(HTMLBaseElement),
-  DEFINE_SHIM(HTMLButtonElement),
-  DEFINE_SHIM(HTMLCanvasElement),
   DEFINE_SHIM(HTMLCollection),
   DEFINE_SHIM(HTMLDocument),
   DEFINE_SHIM(HTMLElement),
   DEFINE_SHIM(HTMLFormElement),
-  DEFINE_SHIM(HTMLFrameElement),
   DEFINE_SHIM(HTMLHtmlElement),
-  DEFINE_SHIM(HTMLIFrameElement),
   DEFINE_SHIM(HTMLImageElement),
   DEFINE_SHIM(HTMLInputElement),
   DEFINE_SHIM(HTMLLinkElement),

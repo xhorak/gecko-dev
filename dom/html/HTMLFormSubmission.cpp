@@ -513,7 +513,7 @@ FSMultipartFormData::AddNameBlobOrNullPair(const nsAString& aName, Blob* aBlob)
                                         nsLinebreakConverter::eLinebreakSpace));
 
     // Get input stream
-    aBlob->GetInternalStream(getter_AddRefs(fileStream), error);
+    aBlob->CreateInputStream(getter_AddRefs(fileStream), error);
     if (NS_WARN_IF(error.Failed())) {
       return error.StealNSResult();
     }
@@ -883,7 +883,7 @@ GetSubmitEncoding(nsGenericHTMLElement* aForm)
 
 void
 GetEnumAttr(nsGenericHTMLElement* aContent,
-            nsIAtom* atom, int32_t* aValue)
+            nsAtom* atom, int32_t* aValue)
 {
   const nsAttrValue* value = aContent->GetParsedAttr(atom);
   if (value && value->Type() == nsAttrValue::eEnum) {

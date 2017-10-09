@@ -2196,7 +2196,7 @@ class StaticAnalysis(MachCommandBase):
                           'the analysis is only performed on the files changed '
                           'in the patch streamed through stdin.  This is called '
                           'the diff mode.')
-    @CommandArgument('--checks', '-c', default='-*,mozilla-*', metavar='checks',
+    @CommandArgument('--checks', '-c', default='-*', metavar='checks',
         help='Static analysis checks to enable.  By default, this enables only '
              'custom Mozilla checks, but can be any clang-tidy checks syntax.')
     @CommandArgument('--jobs', '-j', default='0', metavar='jobs', type=int,
@@ -2205,8 +2205,12 @@ class StaticAnalysis(MachCommandBase):
                      help='Strip NUM leading components from file names in diff mode.')
     @CommandArgument('--fix', '-f', default=False, action='store_true',
                      help='Try to autofix errors detected by clang-tidy checkers.')
+    @CommandArgument('--header-filter', '-h-f', default='', metavar='header_filter',
+                     help='Regular expression matching the names of the headers to '
+                          'output diagnostics from. Diagnostics from the main file '
+                          'of each translation unit are always displayed')
     def check(self, source=None, jobs=2, strip=1, verbose=False,
-              checks='-*,mozilla-*', fix=False):
+              checks='-*', fix=False, header_filter=''):
         self._set_log_level(verbose)
         rc = self._build_compile_db(verbose=verbose)
         if rc != 0:
@@ -2222,9 +2226,21 @@ class StaticAnalysis(MachCommandBase):
 
         python = self.virtualenv_manager.python_path
 
+        if checks == '-*':
+            checks = self._get_checks()
+
         common_args = ['-clang-tidy-binary', self._clang_tidy_path,
+                       '-clang-apply-replacements-binary', self._clang_apply_replacements,
                        '-checks=%s' % checks,
                        '-extra-arg=-DMOZ_CLANG_PLUGIN']
+
+        # Flag header-filter is passed to 'run-clang-tidy' in order to limit
+        # the diagnostic messages only to the specified header files.
+        # When no value is specified the default value is considered to be the source
+        # in order to limit the dianostic message to the source files or folders.
+        common_args.append('-header-filter=%s' %
+                           (header_filter if len(header_filter) else ''.join(source)))
+
         if fix:
             common_args.append('-fix')
 
@@ -2232,19 +2248,17 @@ class StaticAnalysis(MachCommandBase):
 
         compile_db = json.loads(open(self._compile_db, 'r').read())
         total = 0
-        files = []
         import re
         name_re = re.compile('(' + ')|('.join(source) + ')')
         for f in compile_db:
             if name_re.search(f['file']):
                 total = total + 1
-                files.append(f['file'])
 
         if not total:
             return 0
 
         args = [python, self._run_clang_tidy_path, '-p', self.topobjdir]
-        args += ['-j', str(jobs)] + files + common_args
+        args += ['-j', str(jobs)] + source + common_args
         cwd = self.topobjdir
 
         monitor = StaticAnalysisMonitor(self.topsrcdir, self.topobjdir, total)
@@ -2295,6 +2309,21 @@ class StaticAnalysis(MachCommandBase):
             return rc
         args = [self._clang_tidy_path, '-list-checks', '-checks=-*,mozilla-*']
         return self._run_command_in_objdir(args=args, pass_thru=True)
+
+    def _get_checks(self):
+        checks = '-*'
+        import yaml
+        with open(mozpath.join(self.topsrcdir, "tools", "clang-tidy", "config.yaml")) as f:
+            try:
+                config = yaml.load(f)
+                for item in config['clang_checkers']:
+                    if item['publish']:
+                        checks += ',' + item['name']
+            except Exception:
+                print('Looks like config.yaml is not valid, so we are unable to '
+                      'determine default checkers, using \'-checks=-*,mozilla-*\'')
+                checks += ',mozilla-*'
+        return checks
 
     def _get_config_environment(self):
         ran_configure = False
@@ -2370,10 +2399,13 @@ class StaticAnalysis(MachCommandBase):
                                        "clang-tidy")
         self._clang_tidy_path = mozpath.join(clang_tidy_path, "clang", "bin",
                                              "clang-tidy" + config.substs.get('BIN_SUFFIX', ''))
+        self._clang_apply_replacements = mozpath.join(clang_tidy_path, "clang", "bin",
+                                                      "clang-apply-replacements" + config.substs.get('BIN_SUFFIX', ''))
         self._run_clang_tidy_path = mozpath.join(clang_tidy_path, "clang", "share",
                                                  "clang", "run-clang-tidy.py")
 
         if os.path.exists(self._clang_tidy_path) and \
+           os.path.exists(self._clang_apply_replacements) and \
            os.path.exists(self._run_clang_tidy_path) and \
            not force:
             return 0
@@ -2440,6 +2472,7 @@ class StaticAnalysis(MachCommandBase):
                             'the expected output')
 
         assert os.path.exists(self._clang_tidy_path)
+        assert os.path.exists(self._clang_apply_replacements)
         assert os.path.exists(self._run_clang_tidy_path)
         return 0
 

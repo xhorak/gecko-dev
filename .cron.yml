@@ -102,7 +102,7 @@ jobs:
       job:
           type: decision-task
           treeherder-symbol: Nfile
-          target-tasks-method: nightly_file_update
+          target-tasks-method: file_update
       run-on-projects:
           - mozilla-central
       when:

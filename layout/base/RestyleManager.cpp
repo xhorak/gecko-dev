@@ -495,7 +495,7 @@ DumpContext(nsIFrame* aFrame, nsStyleContext* aContext)
   if (aContext) {
     fprintf(stdout, " style: %p ", static_cast<void*>(aContext));
 
-    nsIAtom* pseudoTag = aContext->GetPseudo();
+    nsAtom* pseudoTag = aContext->GetPseudo();
     if (pseudoTag) {
       nsAutoString buffer;
       pseudoTag->ToString(buffer);
@@ -1422,8 +1422,7 @@ RestyleManager::ProcessRestyledFrames(nsStyleChangeList& aChangeList)
       break;
     }
 
-    nsStyleChangeData& mutable_data = aChangeList[i];
-    const nsStyleChangeData& data = mutable_data;
+    const nsStyleChangeData& data = aChangeList[i];
     nsIFrame* frame = data.mFrame;
     nsIContent* content = data.mContent;
     nsChangeHint hint = data.mHint;

@@ -587,13 +587,6 @@ ContentChild::RecvSetXPCOMProcessAttributes(const XPCOMInitData& aXPCOMInit,
   InitXPCOM(aXPCOMInit, aInitialData);
   InitGraphicsDeviceData(aXPCOMInit.contentDeviceData());
 
-#ifdef NS_PRINTING
-  // Force the creation of the nsPrintingProxy so that it's IPC counterpart,
-  // PrintingParent, is always available for printing initiated from the parent.
-  // Create nsPrintingProxy instance later than the SystemGroup initialization.
-  RefPtr<nsPrintingProxy> printingProxy = nsPrintingProxy::GetInstance();
-#endif
-
   return IPC_OK();
 }
 
@@ -680,6 +673,12 @@ ContentChild::Init(MessageLoop* aIOLoop,
 
   mID = aChildID;
   mIsForBrowser = aIsForBrowser;
+
+#ifdef NS_PRINTING
+  // Force the creation of the nsPrintingProxy so that it's IPC counterpart,
+  // PrintingParent, is always available for printing initiated from the parent.
+  RefPtr<nsPrintingProxy> printingProxy = nsPrintingProxy::GetInstance();
+#endif
 
   SetProcessName(NS_LITERAL_STRING("Web Content"));
 
@@ -954,10 +953,18 @@ ContentChild::ProvideWindowCommon(TabChild* aTabOpener,
       return rv;
     }
 
+    OptionalURIParams uriToLoad;
+    if (aURI) {
+      SerializeURI(aURI, uriToLoad);
+    } else {
+      uriToLoad = mozilla::void_t();
+    }
+
     windowCreated =
       SendCreateWindow(aTabOpener, newChild, renderFrame,
                        aChromeFlags, aCalledFromJS, aPositionSpecified,
                        aSizeSpecified,
+                       uriToLoad,
                        features,
                        baseURIString,
                        fullZoom,
@@ -2243,6 +2250,11 @@ ContentChild::RecvRegisterChrome(InfallibleTArray<ChromePackage>&& packages,
     static_cast<nsChromeRegistryContent*>(registrySvc.get());
   chromeRegistry->RegisterRemoteChrome(packages, resources, overrides,
                                        locale, reset);
+  static bool preloadDone = false;
+  if (!preloadDone) {
+    preloadDone = true;
+    nsContentUtils::AsyncPrecreateStringBundles();
+  }
   return IPC_OK();
 }
 
@@ -3023,11 +3035,16 @@ ContentChild::RecvShutdown()
 
 #if defined(MOZ_CRASHREPORTER)
   CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("IPCShutdownState"),
-                                     NS_LITERAL_CSTRING("SendFinishShutdown"));
-#endif
+                                     NS_LITERAL_CSTRING("SendFinishShutdown (sending)"));
+  bool sent = SendFinishShutdown();
+  CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("IPCShutdownState"),
+                                     sent ? NS_LITERAL_CSTRING("SendFinishShutdown (sent)")
+                                          : NS_LITERAL_CSTRING("SendFinishShutdown (failed)"));
+#else
   // Ignore errors here. If this fails, the parent will kill us after a
   // timeout.
   Unused << SendFinishShutdown();
+#endif
   return IPC_OK();
 }
 

@@ -206,7 +206,7 @@ impl CascadeInputs {
     pub fn new_from_style(style: &ComputedValues) -> Self {
         CascadeInputs {
             rules: style.rules.clone(),
-            visited_rules: style.get_visited_style().and_then(|v| v.rules.clone()),
+            visited_rules: style.visited_style().and_then(|v| v.rules.clone()),
         }
     }
 }
@@ -322,8 +322,6 @@ pub struct TraversalStatistics {
     pub selectors: u32,
     /// The number of revalidation selectors.
     pub revalidation_selectors: u32,
-    /// The number of state/attr dependencies in the dependency set.
-    pub dependency_selectors: u32,
     /// The number of declarations in the stylist.
     pub declarations: u32,
     /// The number of times the stylist was rebuilt.
@@ -344,7 +342,6 @@ impl<'a> ops::Add for &'a TraversalStatistics {
                       "traversal_time_ms should be set at the end by the caller");
         debug_assert!(self.selectors == 0, "set at the end");
         debug_assert!(self.revalidation_selectors == 0, "set at the end");
-        debug_assert!(self.dependency_selectors == 0, "set at the end");
         debug_assert!(self.declarations == 0, "set at the end");
         debug_assert!(self.stylist_rebuilds == 0, "set at the end");
         TraversalStatistics {
@@ -355,7 +352,6 @@ impl<'a> ops::Add for &'a TraversalStatistics {
             styles_reused: self.styles_reused + other.styles_reused,
             selectors: 0,
             revalidation_selectors: 0,
-            dependency_selectors: 0,
             declarations: 0,
             stylist_rebuilds: 0,
             traversal_time_ms: 0.0,
@@ -383,7 +379,6 @@ impl fmt::Display for TraversalStatistics {
         writeln!(f, "[PERF],styles_reused,{}", self.styles_reused)?;
         writeln!(f, "[PERF],selectors,{}", self.selectors)?;
         writeln!(f, "[PERF],revalidation_selectors,{}", self.revalidation_selectors)?;
-        writeln!(f, "[PERF],dependency_selectors,{}", self.dependency_selectors)?;
         writeln!(f, "[PERF],declarations,{}", self.declarations)?;
         writeln!(f, "[PERF],stylist_rebuilds,{}", self.stylist_rebuilds)?;
         writeln!(f, "[PERF],traversal_time_ms,{}", self.traversal_time_ms)?;
@@ -405,7 +400,6 @@ impl TraversalStatistics {
         self.traversal_time_ms = (time::precise_time_s() - start) * 1000.0;
         self.selectors = stylist.num_selectors() as u32;
         self.revalidation_selectors = stylist.num_revalidation_selectors() as u32;
-        self.dependency_selectors = stylist.num_invalidations() as u32;
         self.declarations = stylist.num_declarations() as u32;
         self.stylist_rebuilds = stylist.num_rebuilds() as u32;
     }
@@ -817,15 +811,6 @@ pub struct StyleContext<'a, E: TElement + 'a> {
     pub shared: &'a SharedStyleContext<'a>,
     /// The thread-local style context (mutable) reference.
     pub thread_local: &'a mut ThreadLocalStyleContext<E>,
-}
-
-/// Why we're doing reflow.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum ReflowGoal {
-    /// We're reflowing in order to send a display list to the screen.
-    ForDisplay,
-    /// We're reflowing in order to satisfy a script query. No display list will be created.
-    ForScriptQuery,
 }
 
 /// A registered painter

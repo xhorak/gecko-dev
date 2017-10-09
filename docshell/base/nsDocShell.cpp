@@ -362,7 +362,7 @@ ForEachPing(nsIContent* aContent, ForEachPingCallback aCallback, void* aClosure)
     return;
   }
 
-  nsCOMPtr<nsIAtom> pingAtom = NS_Atomize("ping");
+  RefPtr<nsAtom> pingAtom = NS_Atomize("ping");
   if (!pingAtom) {
     return;
   }
@@ -9967,7 +9967,8 @@ nsDocShell::InternalLoad(nsIURI* aURI,
         aURI,
         contentType,
         aTriggeringPrincipal,
-        (aLoadType == LOAD_NORMAL_EXTERNAL))) {
+        (aLoadType == LOAD_NORMAL_EXTERNAL),
+        !aFileName.IsVoid())) {
     // logging to console happens within AllowTopLevelNavigationToDataURI
     return NS_OK;
   }
@@ -10983,7 +10984,7 @@ IsConsideredSameOriginForUIR(nsIPrincipal* aTriggeringPrincipal,
   rv = resultURI->GetSpec(tmpResultSpec);
   NS_ENSURE_SUCCESS(rv, false);
   // replace http with https
-  tmpResultSpec.Replace(0, 4, "https");
+  tmpResultSpec.ReplaceLiteral(0, 4, "https");
 
   nsCOMPtr<nsIURI> tmpResultURI;
   rv = NS_NewURI(getter_AddRefs(tmpResultURI), tmpResultSpec);

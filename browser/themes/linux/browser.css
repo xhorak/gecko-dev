@@ -178,9 +178,6 @@ menuitem.bookmark-item {
   -moz-appearance: none;
   -moz-box-align: stretch;
 }
-.urlbar-input-box {
-  margin: 0;
-}
 
 /* ::::: URL Bar Zoom Reset Button ::::: */
 @keyframes urlbar-zoom-reset-pulse {
@@ -559,6 +556,7 @@ html|span.ac-emphasize-text-url {
 
 /* Support dragging the window using the toolbar when drawing our own
  * decorations, or where the GTK theme allows. */
+#nav-bar,
 #toolbar-menubar:not([autohide="true"]):not(:-moz-lwtheme):-moz-system-metric(menubar-drag),
 #TabsToolbar:not(:-moz-lwtheme):-moz-system-metric(menubar-drag),
 #main-window[tabsintitlebar] #toolbar-menubar:not([autohide="true"]),

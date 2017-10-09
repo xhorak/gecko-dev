@@ -7,6 +7,7 @@
 #include "WebBrowserPersistDocumentParent.h"
 
 #include "mozilla/dom/HTMLAnchorElement.h"
+#include "mozilla/dom/HTMLAreaElement.h"
 #include "mozilla/dom/HTMLInputElement.h"
 #include "mozilla/dom/HTMLObjectElement.h"
 #include "mozilla/dom/HTMLSharedElement.h"
@@ -21,12 +22,9 @@
 #include "nsIDOMAttr.h"
 #include "nsIDOMComment.h"
 #include "nsIDOMDocument.h"
-#include "nsIDOMHTMLAreaElement.h"
 #include "nsIDOMHTMLBaseElement.h"
 #include "nsIDOMHTMLCollection.h"
 #include "nsIDOMHTMLDocument.h"
-#include "nsIDOMHTMLFrameElement.h"
-#include "nsIDOMHTMLIFrameElement.h"
 #include "nsIDOMHTMLImageElement.h"
 #include "nsIDOMHTMLInputElement.h"
 #include "nsIDOMHTMLLinkElement.h"
@@ -575,14 +573,12 @@ ResourceReader::OnWalkDOMNode(nsIDOMNode* aNode)
         return NS_OK;
     }
 
-    nsCOMPtr<nsIDOMHTMLFrameElement> nodeAsFrame = do_QueryInterface(aNode);
-    if (nodeAsFrame) {
+    if (content->IsHTMLElement(nsGkAtoms::frame)) {
         return OnWalkSubframe(aNode);
     }
 
-    nsCOMPtr<nsIDOMHTMLIFrameElement> nodeAsIFrame = do_QueryInterface(aNode);
-    if (nodeAsIFrame && !(mPersistFlags &
-                          IWBP::PERSIST_FLAGS_IGNORE_IFRAMES)) {
+    if (content->IsHTMLElement(nsGkAtoms::iframe) &&
+        !(mPersistFlags & IWBP::PERSIST_FLAGS_IGNORE_IFRAMES)) {
         return OnWalkSubframe(aNode);
     }
 
@@ -950,7 +946,7 @@ PersistNodeFixup::FixupNode(nsIDOMNode *aNodeIn,
         return rv;
     }
 
-    nsCOMPtr<nsIDOMHTMLAreaElement> nodeAsArea = do_QueryInterface(aNodeIn);
+    RefPtr<dom::HTMLAreaElement> nodeAsArea = dom::HTMLAreaElement::FromContent(content);
     if (nodeAsArea) {
         rv = GetNodeToFixup(aNodeIn, aNodeOut);
         if (NS_SUCCEEDED(rv) && *aNodeOut) {
@@ -1089,8 +1085,7 @@ PersistNodeFixup::FixupNode(nsIDOMNode *aNodeIn,
         return rv;
     }
 
-    nsCOMPtr<nsIDOMHTMLFrameElement> nodeAsFrame = do_QueryInterface(aNodeIn);
-    if (nodeAsFrame) {
+    if (content->IsHTMLElement(nsGkAtoms::frame)) {
         rv = GetNodeToFixup(aNodeIn, aNodeOut);
         if (NS_SUCCEEDED(rv) && *aNodeOut) {
             FixupAttribute(*aNodeOut, "src");
@@ -1098,8 +1093,7 @@ PersistNodeFixup::FixupNode(nsIDOMNode *aNodeIn,
         return rv;
     }
 
-    nsCOMPtr<nsIDOMHTMLIFrameElement> nodeAsIFrame = do_QueryInterface(aNodeIn);
-    if (nodeAsIFrame) {
+    if (content->IsHTMLElement(nsGkAtoms::iframe)) {
         rv = GetNodeToFixup(aNodeIn, aNodeOut);
         if (NS_SUCCEEDED(rv) && *aNodeOut) {
             FixupAttribute(*aNodeOut, "src");

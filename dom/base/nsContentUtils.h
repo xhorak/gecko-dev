@@ -37,6 +37,7 @@
 #include "mozilla/Logging.h"
 #include "mozilla/NotNull.h"
 #include "mozilla/Maybe.h"
+#include "mozilla/RangeBoundary.h"
 #include "nsIContentPolicy.h"
 #include "nsIDocument.h"
 #include "nsIDOMMouseEvent.h"
@@ -57,7 +58,7 @@ class imgRequestProxy;
 class nsAutoScriptBlockerSuppressNodeRemoved;
 class nsCacheableFuncStringHTMLCollection;
 class nsHtml5StringParser;
-class nsIAtom;
+class nsAtom;
 class nsIChannel;
 class nsIConsoleService;
 class nsIContent;
@@ -136,6 +137,7 @@ class EventTarget;
 class IPCDataTransfer;
 class IPCDataTransferItem;
 struct LifecycleCallbackArgs;
+struct LifecycleAdoptedCallbackArgs;
 class NodeInfo;
 class nsIContentChild;
 class nsIContentParent;
@@ -185,7 +187,7 @@ struct EventNameMapping
 {
   // This holds pointers to nsGkAtoms members, and is therefore safe as a
   // non-owning reference.
-  nsIAtom* MOZ_NON_OWNING_REF mAtom;
+  nsAtom* MOZ_NON_OWNING_REF mAtom;
   int32_t  mType;
   mozilla::EventMessage mMessage;
   mozilla::EventClassID mEventClassID;
@@ -446,6 +448,9 @@ public:
   static int32_t ComparePoints(nsIDOMNode* aParent1, int32_t aOffset1,
                                nsIDOMNode* aParent2, int32_t aOffset2,
                                bool* aDisconnected = nullptr);
+  static int32_t ComparePoints(const mozilla::RawRangeBoundary& aFirst,
+                               const mozilla::RawRangeBoundary& aSecond,
+                               bool* aDisconnected = nullptr);
 
   /**
    * Brute-force search of the element subtree rooted at aContent for
@@ -457,7 +462,7 @@ public:
   /**
    * Similar to above, but to be used if one already has an atom for the ID
    */
-  static Element* MatchElementId(nsIContent *aContent, const nsIAtom* aId);
+  static Element* MatchElementId(nsIContent *aContent, const nsAtom* aId);
 
   /**
    * Reverses the document position flags passed in.
@@ -590,10 +595,10 @@ public:
   static bool CanCallerAccess(nsPIDOMWindowInner* aWindow);
 
   // Check if the principal is chrome or an addon with the permission.
-  static bool PrincipalHasPermission(nsIPrincipal* aPrincipal, const nsIAtom* aPerm);
+  static bool PrincipalHasPermission(nsIPrincipal* aPrincipal, const nsAtom* aPerm);
 
   // Check if the JS caller is chrome or an addon with the permission.
-  static bool CallerHasPermission(JSContext* aCx, const nsIAtom* aPerm);
+  static bool CallerHasPermission(JSContext* aCx, const nsAtom* aPerm);
 
   /**
    * GetDocumentFromCaller gets its document by looking at the last called
@@ -662,7 +667,7 @@ public:
    * Returns true if |aName| is a valid name to be registered via
    * document.registerElement.
    */
-  static bool IsCustomElementName(nsIAtom* aName);
+  static bool IsCustomElementName(nsAtom* aName);
 
   static nsresult CheckQName(const nsAString& aQualifiedName,
                              bool aNamespaceAware = true,
@@ -670,7 +675,7 @@ public:
 
   static nsresult SplitQName(const nsIContent* aNamespaceResolver,
                              const nsString& aQName,
-                             int32_t *aNamespace, nsIAtom **aLocalName);
+                             int32_t *aNamespace, nsAtom **aLocalName);
 
   static nsresult GetNodeInfoFromQName(const nsAString& aNamespaceURI,
                                        const nsAString& aQualifiedName,
@@ -678,8 +683,8 @@ public:
                                        uint16_t aNodeType,
                                        mozilla::dom::NodeInfo** aNodeInfo);
 
-  static void SplitExpatName(const char16_t *aExpatName, nsIAtom **aPrefix,
-                             nsIAtom **aTagName, int32_t *aNameSpaceID);
+  static void SplitExpatName(const char16_t *aExpatName, nsAtom **aPrefix,
+                             nsAtom **aTagName, int32_t *aNameSpaceID);
 
   // Get a permission-manager setting for the given principal and type.
   // If the pref doesn't exist or if it isn't ALLOW_ACTION, false is
@@ -734,7 +739,7 @@ public:
    * and the attribute value is non-empty.
    */
   static bool HasNonEmptyAttr(const nsIContent* aContent, int32_t aNameSpaceID,
-                                nsIAtom* aName);
+                                nsAtom* aName);
 
   /**
    * Method that gets the primary presContext for the node.
@@ -868,7 +873,7 @@ public:
    * set to null.
    */
   static nsresult QNameChanged(mozilla::dom::NodeInfo* aNodeInfo,
-                               nsIAtom* aName,
+                               nsAtom* aName,
                                mozilla::dom::NodeInfo** aResult);
 
   /**
@@ -877,7 +882,7 @@ public:
    * SVG's "evt" and the rest of the world's "event", and because onerror
    * on window takes 5 args.
    */
-  static void GetEventArgNames(int32_t aNameSpaceID, nsIAtom *aEventName,
+  static void GetEventArgNames(int32_t aNameSpaceID, nsAtom *aEventName,
                                bool aIsForWindow,
                                uint32_t *aArgCount, const char*** aArgNames);
 
@@ -1431,7 +1436,7 @@ public:
    * @param aName the event name to look up
    * @param aType the type of content
    */
-  static bool IsEventAttributeName(nsIAtom* aName, int32_t aType);
+  static bool IsEventAttributeName(nsAtom* aName, int32_t aType);
 
   /**
    * Return the event message for the event with the given name. The name is
@@ -1440,14 +1445,14 @@ public:
    *
    * @param aName the event name to look up
    */
-  static mozilla::EventMessage GetEventMessage(nsIAtom* aName);
+  static mozilla::EventMessage GetEventMessage(nsAtom* aName);
 
   /**
-   * Returns the EventMessage and nsIAtom to be used for event listener
+   * Returns the EventMessage and nsAtom to be used for event listener
    * registration.
    */
   static mozilla::EventMessage
-  GetEventMessageAndAtomForListener(const nsAString& aName, nsIAtom** aOnName);
+  GetEventMessageAndAtomForListener(const nsAString& aName, nsAtom** aOnName);
 
   /**
    * Return the EventClassID for the event with the given name. The name is the
@@ -1467,7 +1472,7 @@ public:
    * @param aName the event name to look up
    * @param aEventClassID only return event id for aEventClassID
    */
-  static nsIAtom* GetEventMessageAndAtom(const nsAString& aName,
+  static nsAtom* GetEventMessageAndAtom(const nsAString& aName,
                                          mozilla::EventClassID aEventClassID,
                                          mozilla::EventMessage* aEventMessage);
 
@@ -1525,7 +1530,7 @@ public:
    * @param aPrefix prefix of the node
    * @param aNamespaceID namespace of the node
    */
-  static bool IsValidNodeName(nsIAtom *aLocalName, nsIAtom *aPrefix,
+  static bool IsValidNodeName(nsAtom *aLocalName, nsAtom *aPrefix,
                                 int32_t aNamespaceID);
 
   /**
@@ -1568,7 +1573,7 @@ public:
    */
   static nsresult ParseFragmentHTML(const nsAString& aSourceBuffer,
                                     nsIContent* aTargetNode,
-                                    nsIAtom* aContextLocalName,
+                                    nsAtom* aContextLocalName,
                                     int32_t aContextNamespace,
                                     bool aQuirks,
                                     bool aPreventScriptExecution);
@@ -1700,6 +1705,14 @@ public:
    * FALSE.
    */
   static void NotifyInstalledMenuKeyboardListener(bool aInstalling);
+
+  /**
+   * Check whether the nsIURI uses the given scheme.
+   *
+   * Note that this will check the innermost URI rather than that of
+   * the nsIURI itself.
+   */
+  static bool SchemeIs(nsIURI* aURI, const char* aScheme);
 
   /**
    * Returns true if aPrincipal is the system principal.
@@ -1934,17 +1947,6 @@ public:
    * See RunInStableState for more information about stable states
    */
   static nsISerialEventTarget* GetStableStateEventTarget();
-
-  // Call EnterMicroTask when you're entering JS execution.
-  // Usually the best way to do this is to use nsAutoMicroTask.
-  static void EnterMicroTask();
-  static void LeaveMicroTask();
-
-  static bool IsInMicroTask();
-  static uint32_t MicroTaskLevel();
-  static void SetMicroTaskLevel(uint32_t aLevel);
-
-  static void PerformMainThreadMicroTaskCheckpoint();
 
   /* Process viewport META data. This gives us information for the scale
    * and zoom of a page on mobile devices. We stick the information in
@@ -2258,6 +2260,14 @@ public:
   static bool IsResourceTimingEnabled()
   {
     return sIsResourceTimingEnabled;
+  }
+
+  /*
+   * Returns true if the performance timing APIs are enabled.
+   */
+  static bool IsPerformanceNavigationTimingEnabled()
+  {
+    return sIsPerformanceNavigationTimingEnabled;
   }
 
   /*
@@ -2575,7 +2585,7 @@ public:
    *         false if the attribute doesn't exist, or has a malformed
    *                  value, such as an unknown or unterminated entity.
    */
-  static bool GetPseudoAttributeValue(const nsString& aSource, nsIAtom *aName,
+  static bool GetPseudoAttributeValue(const nsString& aSource, nsAtom *aName,
                                       nsAString& aValue);
 
   /**
@@ -2995,8 +3005,8 @@ public:
 
   static mozilla::dom::CustomElementDefinition*
   GetElementDefinitionIfObservingAttr(Element* aCustomElement,
-                                      nsIAtom* aExtensionType,
-                                      nsIAtom* aAttrName);
+                                      nsAtom* aExtensionType,
+                                      nsAtom* aAttrName);
 
   static void SyncInvokeReactions(nsIDocument::ElementCallbackType aType,
                                   Element* aCustomElement,
@@ -3008,11 +3018,12 @@ public:
   static void EnqueueLifecycleCallback(nsIDocument::ElementCallbackType aType,
                                        Element* aCustomElement,
                                        mozilla::dom::LifecycleCallbackArgs* aArgs = nullptr,
+                                       mozilla::dom::LifecycleAdoptedCallbackArgs* aAdoptedCallbackArgs = nullptr,
                                        mozilla::dom::CustomElementDefinition* aDefinition = nullptr);
 
   static void GetCustomPrototype(nsIDocument* aDoc,
                                  int32_t aNamespaceID,
-                                 nsIAtom* aAtom,
+                                 nsAtom* aAtom,
                                  JS::MutableHandle<JSObject*> prototype);
 
   static bool AttemptLargeAllocationLoad(nsIHttpChannel* aChannel);
@@ -3195,11 +3206,12 @@ public:
    */
   static bool IsMessageInputEvent(const IPC::Message& aMsg);
 
+  static void AsyncPrecreateStringBundles();
+
 private:
   static bool InitializeEventTable();
 
   static nsresult EnsureStringBundle(PropertiesFile aFile);
-  static void AsyncPrecreateStringBundles();
 
   static bool CanCallerAccess(nsIPrincipal* aSubjectPrincipal,
                                 nsIPrincipal* aPrincipal);
@@ -3234,7 +3246,7 @@ private:
 
   static bool MatchClassNames(mozilla::dom::Element* aElement,
                               int32_t aNamespaceID,
-                              nsIAtom* aAtom, void* aData);
+                              nsAtom* aAtom, void* aData);
   static void DestroyClassNameArray(void* aData);
   static void* AllocClassMatchingInfo(nsINode* aRootNode,
                                       const nsString* aClasses);
@@ -3290,9 +3302,9 @@ private:
 
   static nsIConsoleService* sConsoleService;
 
-  static nsDataHashtable<nsISupportsHashKey, EventNameMapping>* sAtomEventTable;
+  static nsDataHashtable<nsRefPtrHashKey<nsAtom>, EventNameMapping>* sAtomEventTable;
   static nsDataHashtable<nsStringHashKey, EventNameMapping>* sStringEventTable;
-  static nsCOMArray<nsIAtom>* sUserDefinedEvents;
+  static nsTArray<RefPtr<nsAtom>>* sUserDefinedEvents;
 
   static nsIStringBundleService* sStringBundleService;
   static nsIStringBundle* sStringBundles[PropertiesFile_COUNT];
@@ -3308,7 +3320,7 @@ private:
   static bool sInitialized;
   static uint32_t sScriptBlockerCount;
   static uint32_t sDOMNodeRemovedSuppressCount;
-  static uint32_t sMicroTaskLevel;
+
   // Not an nsCOMArray because removing elements from those is slower
   static AutoTArray<nsCOMPtr<nsIRunnable>, 8>* sBlockedScriptRunners;
   static uint32_t sRunnersCountAtFirstBlocker;
@@ -3325,6 +3337,7 @@ private:
   static uint32_t sHandlingInputTimeout;
   static bool sIsPerformanceTimingEnabled;
   static bool sIsResourceTimingEnabled;
+  static bool sIsPerformanceNavigationTimingEnabled;
   static bool sIsUserTimingLoggingEnabled;
   static bool sIsFrameTimingPrefEnabled;
   static bool sIsFormAutofillAutocompleteEnabled;
@@ -3466,19 +3479,6 @@ public:
   }
   ~nsAutoScriptBlockerSuppressNodeRemoved() {
     --nsContentUtils::sDOMNodeRemovedSuppressCount;
-  }
-};
-
-class MOZ_STACK_CLASS nsAutoMicroTask
-{
-public:
-  nsAutoMicroTask()
-  {
-    nsContentUtils::EnterMicroTask();
-  }
-  ~nsAutoMicroTask()
-  {
-    nsContentUtils::LeaveMicroTask();
   }
 };
 

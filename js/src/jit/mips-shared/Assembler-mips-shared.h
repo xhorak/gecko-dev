@@ -80,7 +80,6 @@ struct SecondScratchRegisterScope : public AutoRegisterScope
 
 // Use arg reg from EnterJIT function as OsrFrameReg.
 static constexpr Register OsrFrameReg = a3;
-static constexpr Register ArgumentsRectifierReg = s3;
 static constexpr Register CallTempReg0 = t0;
 static constexpr Register CallTempReg1 = t1;
 static constexpr Register CallTempReg2 = t2;
@@ -733,7 +732,8 @@ PatchJump(CodeLocationJump& jump_, CodeLocationLabel label,
 void
 PatchBackedge(CodeLocationJump& jump_, CodeLocationLabel label, JitZoneGroup::BackedgeTarget target);
 
-typedef js::jit::AssemblerBuffer<1024, Instruction> MIPSBuffer;
+static constexpr int32_t SliceSize = 1024;
+typedef js::jit::AssemblerBuffer<SliceSize, Instruction> MIPSBuffer;
 
 class MIPSBufferWithExecutableCopy : public MIPSBuffer
 {
@@ -751,6 +751,11 @@ class MIPSBufferWithExecutableCopy : public MIPSBuffer
     bool appendRawCode(const uint8_t* code, size_t numBytes) {
         if (this->oom())
             return false;
+        while (numBytes > SliceSize) {
+            this->putBytes(SliceSize, code);
+            numBytes -= SliceSize;
+            code += SliceSize;
+        }
         this->putBytes(numBytes, code);
         return !this->oom();
     }
@@ -954,6 +959,8 @@ class AssemblerMIPSShared : public AssemblerShared
   public:
     void finish();
     bool appendRawCode(const uint8_t* code, size_t numBytes);
+    bool reserve(size_t size);
+    bool swapBuffer(wasm::Bytes& bytes);
     void executableCopy(void* buffer, bool flushICache = true);
     void copyJumpRelocationTable(uint8_t* dest);
     void copyDataRelocationTable(uint8_t* dest);
@@ -1228,7 +1235,6 @@ class AssemblerMIPSShared : public AssemblerShared
     void bind(Label* label, BufferOffset boff = BufferOffset());
     void bindLater(Label* label, wasm::TrapDesc target);
     virtual void bind(InstImm* inst, uintptr_t branch, uintptr_t target) = 0;
-    virtual void Bind(uint8_t* rawCode, CodeOffset label, CodeOffset target) = 0;
     void bind(CodeOffset* label) {
         label->bind(currentOffset());
     }
@@ -1307,8 +1313,6 @@ class AssemblerMIPSShared : public AssemblerShared
     static void ToggleToCmp(CodeLocationLabel inst_);
 
     static void UpdateLuiOriValue(Instruction* inst0, Instruction* inst1, uint32_t value);
-
-    void processCodeLabels(uint8_t* rawCode);
 
     bool bailed() {
         return m_buffer.bail();

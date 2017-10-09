@@ -973,9 +973,11 @@ TabParent::RecvPDocAccessibleConstructor(PDocAccessibleParent* aDoc,
 #ifdef XP_WIN
     a11y::WrapperFor(doc)->SetID(aMsaaID);
     MOZ_ASSERT(!aDocCOMProxy.IsNull());
+#ifdef NIGHTLY_BUILD
     if (aDocCOMProxy.IsNull()) {
       return IPC_FAIL(this, "Constructing a top-level PDocAccessible with null COM proxy");
     }
+#endif
 
     RefPtr<IAccessible> proxy(aDocCOMProxy.Get());
     doc->SetCOMInterface(proxy);
@@ -2305,7 +2307,12 @@ TabParent::SendCompositionEvent(WidgetCompositionEvent& aEvent)
   if (!mContentCache.OnCompositionEvent(aEvent)) {
     return true;
   }
-  if (NS_WARN_IF(!PBrowserParent::SendCompositionEvent(aEvent))) {
+
+  bool ret =
+    Manager()->AsContentParent()->IsInputPriorityEventEnabled()
+      ? PBrowserParent::SendCompositionEvent(aEvent)
+      : PBrowserParent::SendNormalPriorityCompositionEvent(aEvent);
+  if (NS_WARN_IF(!ret)) {
     return false;
   }
   MOZ_ASSERT(aEvent.HasBeenPostedToRemoteProcess());
@@ -2323,7 +2330,11 @@ TabParent::SendSelectionEvent(WidgetSelectionEvent& aEvent)
     return true;
   }
   mContentCache.OnSelectionEvent(aEvent);
-  if (NS_WARN_IF(!PBrowserParent::SendSelectionEvent(aEvent))) {
+  bool ret =
+    Manager()->AsContentParent()->IsInputPriorityEventEnabled()
+      ? PBrowserParent::SendSelectionEvent(aEvent)
+      : PBrowserParent::SendNormalPrioritySelectionEvent(aEvent);
+  if (NS_WARN_IF(!ret)) {
     return false;
   }
   MOZ_ASSERT(aEvent.HasBeenPostedToRemoteProcess());

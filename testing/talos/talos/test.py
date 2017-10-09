@@ -144,7 +144,6 @@ class ts_paint(TsBase):
     win7_counters = []
     filters = filter.ignore_first.prepare(1) + filter.median.prepare()
     tpmozafterpaint = True
-    rss = False
     mainthread = False
     responsiveness = False
     unit = 'ms'
@@ -238,7 +237,7 @@ class PageloaderTest(Test):
     timeout = None
     keys = ['tpmanifest', 'tpcycles', 'tppagecycles', 'tprender', 'tpchrome',
             'tpmozafterpaint', 'fnbpaint', 'tploadnocache', 'firstpaint', 'userready',
-            'testeventmap', 'base_vs_ref', 'rss', 'mainthread', 'resolution', 'cycles',
+            'testeventmap', 'base_vs_ref', 'mainthread', 'resolution', 'cycles',
             'gecko_profile', 'gecko_profile_interval', 'gecko_profile_entries',
             'tptimeout', 'win_counters', 'w7_counters', 'linux_counters', 'mac_counters',
             'tpscrolltest', 'xperf_counters', 'timeout', 'shutdown', 'responsiveness',
@@ -279,6 +278,30 @@ class tpaint(PageloaderTest):
     filters = filter.ignore_first.prepare(5) + filter.median.prepare()
     unit = 'ms'
     preferences = {'security.data_uri.block_toplevel_data_uri_navigations': False}
+
+
+@register_test()
+class cpstartup(PageloaderTest):
+    """
+    Tests the amount of time it takes to start up a new content process and
+    initialize it to the point where it can start processing incoming URLs
+    to load.
+    """
+    extensions = '${talos}/tests/cpstartup'
+    tpmanifest = '${talos}/tests/cpstartup/cpstartup.manifest'
+    tppagecycles = 20
+    gecko_profile_entries = 1000000
+    tploadnocache = True
+    unit = 'ms'
+    preferences = {
+        # By default, Talos is configured to open links from
+        # content in new windows. We're overriding them so that
+        # they open in new tabs instead.
+        # See http://kb.mozillazine.org/Browser.link.open_newwindow
+        # and http://kb.mozillazine.org/Browser.link.open_newwindow.restriction
+        'browser.link.open_newwindow': 3,
+        'browser.link.open_newwindow.restriction': 2,
+    }
 
 
 @register_test()
@@ -491,7 +514,6 @@ class tp5n(PageloaderTest):
     cycles = 1
     tpmozafterpaint = True
     tptimeout = 5000
-    rss = True
     mainthread = True
     w7_counters = []
     win_counters = []
@@ -528,14 +550,12 @@ class tp5o(PageloaderTest):
     cycles = 1
     tpmozafterpaint = True
     tptimeout = 5000
-    rss = True
     mainthread = False
     tpmanifest = '${talos}/tests/tp5n/tp5o.manifest'
-    win_counters = ['Main_RSS', 'Private Bytes', '% Processor Time']
-    w7_counters = ['Main_RSS', 'Private Bytes', '% Processor Time',
-                   'Modified Page List Bytes']
-    linux_counters = ['Private Bytes', 'XRes', 'Main_RSS']
-    mac_counters = ['Main_RSS']
+    win_counters = ['% Processor Time']
+    w7_counters = ['% Processor Time']
+    linux_counters = ['XRes']
+    mac_counters = []
     responsiveness = True
     gecko_profile_interval = 2
     gecko_profile_entries = 4000000
@@ -815,6 +835,7 @@ class perf_reftest(PageloaderTest):
     tpmanifest = '${talos}/tests/perf-reftest/perf_reftest.manifest'
     tpcycles = 1
     tppagecycles = 10
+    tptimeout = 30000
     gecko_profile_interval = 1
     gecko_profile_entries = 2000000
     filters = filter.ignore_first.prepare(5) + filter.median.prepare()

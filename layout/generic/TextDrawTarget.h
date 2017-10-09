@@ -20,8 +20,8 @@ using namespace gfx;
 // This is used by all Advanced Layers users, so we use plain gfx types
 struct TextRunFragment {
   ScaledFont* font;
-  Color color;
-  nsTArray<gfx::Glyph> glyphs;
+  wr::ColorF color;
+  nsTArray<wr::GlyphInstance> glyphs;
 };
 
 // Only webrender handles this, so we use webrender types
@@ -49,11 +49,26 @@ struct SelectionFragment {
 // For almost all nsTextFrames, there will be only one SelectedTextRunFragment.
 struct SelectedTextRunFragment {
   Maybe<SelectionFragment> selection;
-  nsTArray<wr::TextShadow> shadows;
-  nsTArray<TextRunFragment> text;
-  nsTArray<wr::Line> beforeDecorations;
-  nsTArray<wr::Line> afterDecorations;
+  AutoTArray<wr::Shadow, 1> shadows;
+  AutoTArray<TextRunFragment, 1> text;
+  AutoTArray<wr::Line, 1> beforeDecorations;
+  AutoTArray<wr::Line, 1> afterDecorations;
 };
+
+}
+}
+
+// AutoTArray is bad
+template<>
+struct nsTArray_CopyChooser<mozilla::layout::SelectedTextRunFragment>
+{
+  typedef nsTArray_CopyWithConstructors<mozilla::layout::SelectedTextRunFragment> Type;
+};
+
+namespace mozilla {
+namespace layout {
+
+using namespace gfx;
 
 // This class is fake DrawTarget, used to intercept text draw calls, while
 // also collecting up the other aspects of text natively.
@@ -91,8 +106,10 @@ public:
     eSelection, eUnderline, eOverline, eGlyphs, eEmphasisMarks, eLineThrough
   };
 
-  explicit TextDrawTarget()
-  : mCurrentlyDrawing(Phase::eSelection), mHasUnsupportedFeatures(false)
+  explicit TextDrawTarget(const layers::StackingContextHelper& aSc)
+  : mCurrentlyDrawing(Phase::eSelection),
+    mHasUnsupportedFeatures(false),
+    mSc(aSc)
   {
     SetSelectionIndex(0);
   }
@@ -147,36 +164,30 @@ public:
     TextRunFragment* fragment;
     if (mCurrentPart->text.IsEmpty() ||
         mCurrentPart->text.LastElement().font != aFont ||
-        mCurrentPart->text.LastElement().color != colorPat->mColor) {
+        !(mCurrentPart->text.LastElement().color ==  wr::ToColorF(colorPat->mColor))) {
       fragment = mCurrentPart->text.AppendElement();
       fragment->font = aFont;
-      fragment->color = colorPat->mColor;
+      fragment->color = wr::ToColorF(colorPat->mColor);
     } else {
       fragment = &mCurrentPart->text.LastElement();
     }
 
-    nsTArray<Glyph>& glyphs = fragment->glyphs;
+    nsTArray<wr::GlyphInstance>& glyphs = fragment->glyphs;
 
     size_t oldLength = glyphs.Length();
     glyphs.SetLength(oldLength + aBuffer.mNumGlyphs);
-    PodCopy(glyphs.Elements() + oldLength, aBuffer.mGlyphs, aBuffer.mNumGlyphs);
 
-    // If there's a skew for synthetic italics we need to apply it, as the font
-    // code applies the inverse transformation to glyph positions in anticipation.
-    Matrix trans = GetTransform();
-    if (trans._21 != 0) {
-      Matrix skew = Matrix(1, trans._12,
-                           trans._21, 1,
-                           0, 0);
-      for (size_t i = oldLength; i < oldLength + aBuffer.mNumGlyphs; ++i) {
-        auto position = &glyphs[i].mPosition;
-        *position = skew.TransformPoint(*position);
-      }
+    for (size_t i = 0; i < aBuffer.mNumGlyphs; i++) {
+      wr::GlyphInstance& targetGlyph = glyphs[oldLength + i];
+      const gfx::Glyph& sourceGlyph = aBuffer.mGlyphs[i];
+      targetGlyph.index = sourceGlyph.mIndex;
+      targetGlyph.point = mSc.ToRelativeLayoutPoint(
+              LayerPoint::FromUnknownPoint(sourceGlyph.mPosition));
     }
   }
 
   void
-  AppendShadow(const wr::TextShadow& aShadow) {
+  AppendShadow(const wr::Shadow& aShadow) {
     mCurrentPart->shadows.AppendElement(aShadow);
   }
 
@@ -271,48 +282,16 @@ public:
     return true;
   }
 
-  // TextLayers don't support very complicated text right now. This checks
-  // if any of the problem cases exist.
   bool
-  ContentsAreSimple()
-  {
-
-    ScaledFont* font = nullptr;
-
-    for (const SelectedTextRunFragment& part : GetParts()) {
-      // Can't handle shadows, selections, or decorations
-      if (part.shadows.Length() > 0 ||
-          part.beforeDecorations.Length() > 0 ||
-          part.afterDecorations.Length() > 0 ||
-          part.selection.isSome()) {
-        return false;
-      }
-
-      // Must only have one font (multiple colors is fine)
-      for (const mozilla::layout::TextRunFragment& text : part.text) {
-        if (!font) {
-          font = text.font;
-        }
-        if (font != text.font) {
-          return false;
-        }
-      }
-    }
-
-    // Must have an actual font (i.e. actual text)
-    if (!font) {
-      return false;
-    }
-
-    return true;
-  }
-
-  void
   CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuilder,
                           const layers::StackingContextHelper& aSc,
                           layers::WebRenderLayerManager* aManager,
                           nsDisplayItem* aItem,
                           nsRect& aBounds) {
+
+  if (!CanSerializeFonts()) {
+    return false;
+  }
 
   // Drawing order: selections,
   //                shadows,
@@ -351,8 +330,8 @@ public:
   for (auto& part : GetParts()) {
     // WR takes the shadows in CSS-order (reverse of rendering order),
     // because the drawing of a shadow actually occurs when it's popped.
-    for (const wr::TextShadow& shadow : part.shadows) {
-      aBuilder.PushTextShadow(wrBoundsRect, wrClipRect, backfaceVisible, shadow);
+    for (const wr::Shadow& shadow : part.shadows) {
+      aBuilder.PushShadow(wrBoundsRect, wrClipRect, backfaceVisible, shadow);
     }
 
     for (const wr::Line& decoration : part.beforeDecorations) {
@@ -361,7 +340,7 @@ public:
 
     for (const mozilla::layout::TextRunFragment& text : part.text) {
       aManager->WrBridge()->PushGlyphs(aBuilder, text.glyphs, text.font,
-                                       text.color, aSc, boundsRect, clipRect,
+                                       text.color, aSc, wrBoundsRect, wrClipRect,
                                        backfaceVisible);
     }
 
@@ -370,11 +349,12 @@ public:
     }
 
     for (size_t i = 0; i < part.shadows.Length(); ++i) {
-      aBuilder.PopTextShadow();
+      aBuilder.PopShadow();
     }
   }
-}
 
+  return true;
+}
 
 private:
   // The part of the text we're currently drawing (glyphs, underlines, etc.)
@@ -384,10 +364,15 @@ private:
   SelectedTextRunFragment* mCurrentPart;
 
   // Chunks of the text, grouped by selection
-  nsTArray<SelectedTextRunFragment> mParts;
+  AutoTArray<SelectedTextRunFragment, 1> mParts;
 
   // Whether Tofu or SVG fonts were encountered
   bool mHasUnsupportedFeatures;
+
+  // Needs to be saved so FillGlyphs can use this to offset glyphs to
+  // relative space. Shouldn't be used otherwise (may dangle if we move
+  // to retaining TextDrawTargets)
+  const layers::StackingContextHelper& mSc;
 
   // The rest of this is dummy implementations of DrawTarget's API
 public:

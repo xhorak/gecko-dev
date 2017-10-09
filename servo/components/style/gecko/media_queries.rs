@@ -18,7 +18,6 @@ use gecko_bindings::structs::{nsCSSKeyword, nsCSSProps_KTableEntry, nsCSSValue, 
 use gecko_bindings::structs::{nsMediaExpression_Range, nsMediaFeature};
 use gecko_bindings::structs::{nsMediaFeature_ValueType, nsMediaFeature_RangeType, nsMediaFeature_RequirementFlags};
 use gecko_bindings::structs::{nsPresContext, RawGeckoPresContextOwned};
-use gecko_bindings::structs::nsIAtom;
 use media_queries::MediaType;
 use parser::ParserContext;
 use properties::{ComputedValues, StyleBuilder};
@@ -33,6 +32,7 @@ use string_cache::Atom;
 use style_traits::{CSSPixel, DevicePixel};
 use style_traits::{ToCss, ParseError, StyleParseError};
 use style_traits::viewport::ViewportConstraints;
+use stylesheets::Origin;
 use values::{CSSFloat, CustomIdent, serialize_dimension};
 use values::computed::{self, ToComputedValue};
 use values::specified::Length;
@@ -165,7 +165,7 @@ impl Device {
             // mMediaEmulated.
             let context = self.pres_context();
             let medium_to_use = if context.mIsEmulatingMedia() != 0 {
-                context.mMediaEmulated.raw::<nsIAtom>()
+                context.mMediaEmulated.mRawPtr
             } else {
                 context.mMedium
             };
@@ -374,8 +374,8 @@ impl MediaExpressionValue {
                 Some(MediaExpressionValue::BoolInteger(i == 1))
             }
             nsMediaFeature_ValueType::eResolution => {
-                debug_assert!(css_value.mUnit == nsCSSUnit::eCSSUnit_Inch);
-                Some(MediaExpressionValue::Resolution(Resolution::Dpi(css_value.float_unchecked())))
+                debug_assert!(css_value.mUnit == nsCSSUnit::eCSSUnit_Pixel);
+                Some(MediaExpressionValue::Resolution(Resolution::Dppx(css_value.float_unchecked())))
             }
             nsMediaFeature_ValueType::eEnumerated => {
                 let value = css_value.integer_unchecked() as i16;
@@ -585,8 +585,10 @@ impl Expression {
     /// ```
     /// (media-feature: media-value)
     /// ```
-    pub fn parse<'i, 't>(context: &ParserContext, input: &mut Parser<'i, 't>)
-                         -> Result<Self, ParseError<'i>> {
+    pub fn parse<'i, 't>(
+        context: &ParserContext,
+        input: &mut Parser<'i, 't>,
+    ) -> Result<Self, ParseError<'i>> {
         input.expect_parenthesis_block().map_err(|err|
             match err {
                 BasicParseError::UnexpectedToken(t) => StyleParseError::ExpectedIdentifier(t),
@@ -607,6 +609,12 @@ impl Expression {
                 )?;
 
                 let mut flags = 0;
+
+                if context.in_chrome_stylesheet() ||
+                    context.stylesheet_origin == Origin::UserAgent {
+                    flags |= nsMediaFeature_RequirementFlags::eUserAgentAndChromeOnly as u8;
+                }
+
                 let result = {
                     let mut feature_name = &**ident;
 

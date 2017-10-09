@@ -71,8 +71,8 @@ WebRenderBridgeChild::AddWebRenderParentCommands(const nsTArray<WebRenderParentC
   mParentCommands.AppendElements(aCommands);
 }
 
-bool
-WebRenderBridgeChild::BeginTransaction(const gfx::IntSize& aSize)
+void
+WebRenderBridgeChild::BeginTransaction()
 {
   MOZ_ASSERT(!mDestroyed);
 
@@ -80,7 +80,6 @@ WebRenderBridgeChild::BeginTransaction(const gfx::IntSize& aSize)
   mIsInTransaction = true;
   mReadLockSequenceNumber = 0;
   mReadLocks.AppendElement();
-  return true;
 }
 
 void
@@ -115,7 +114,8 @@ WebRenderBridgeChild::UpdateResources(wr::IpcResourceUpdateQueue& aResources)
 }
 
 void
-WebRenderBridgeChild::EndTransaction(wr::DisplayListBuilder &aBuilder,
+WebRenderBridgeChild::EndTransaction(const wr::LayoutSize& aContentSize,
+                                     wr::BuiltDisplayList& aDL,
                                      wr::IpcResourceUpdateQueue& aResources,
                                      const gfx::IntSize& aSize,
                                      bool aIsSync,
@@ -126,10 +126,7 @@ WebRenderBridgeChild::EndTransaction(wr::DisplayListBuilder &aBuilder,
   MOZ_ASSERT(!mDestroyed);
   MOZ_ASSERT(mIsInTransaction);
 
-  wr::BuiltDisplayList dl;
-  wr::LayoutSize contentSize;
-  aBuilder.Finalize(contentSize, dl);
-  ByteBuffer dlData(Move(dl.dl));
+  ByteBuffer dlData(Move(aDL.dl));
 
   TimeStamp fwdTime;
 #if defined(ENABLE_FRAME_LATENCY_LOG)
@@ -144,13 +141,13 @@ WebRenderBridgeChild::EndTransaction(wr::DisplayListBuilder &aBuilder,
   if (aIsSync) {
     this->SendSetDisplayListSync(aSize, mParentCommands, mDestroyedActors,
                                  GetFwdTransactionId(), aTransactionId,
-                                 contentSize, dlData, dl.dl_desc, aScrollData,
+                                 aContentSize, dlData, aDL.dl_desc, aScrollData,
                                  Move(resourceUpdates), Move(smallShmems), Move(largeShmems),
                                  mIdNamespace, aTxnStartTime, fwdTime);
   } else {
     this->SendSetDisplayList(aSize, mParentCommands, mDestroyedActors,
                              GetFwdTransactionId(), aTransactionId,
-                             contentSize, dlData, dl.dl_desc, aScrollData,
+                             aContentSize, dlData, aDL.dl_desc, aScrollData,
                              Move(resourceUpdates), Move(smallShmems), Move(largeShmems),
                              mIdNamespace, aTxnStartTime, fwdTime);
   }
@@ -248,9 +245,9 @@ WriteFontFileData(const uint8_t* aData, uint32_t aLength, uint32_t aIndex,
 }
 
 void
-WebRenderBridgeChild::PushGlyphs(wr::DisplayListBuilder& aBuilder, const nsTArray<gfx::Glyph>& aGlyphs,
-                                 gfx::ScaledFont* aFont, const gfx::Color& aColor, const StackingContextHelper& aSc,
-                                 const LayerRect& aBounds, const LayerRect& aClip, bool aBackfaceVisible)
+WebRenderBridgeChild::PushGlyphs(wr::DisplayListBuilder& aBuilder, const nsTArray<wr::GlyphInstance>& aGlyphs,
+                                 gfx::ScaledFont* aFont, const wr::ColorF& aColor, const StackingContextHelper& aSc,
+                                 const wr::LayerRect& aBounds, const wr::LayerRect& aClip, bool aBackfaceVisible)
 {
   MOZ_ASSERT(aFont);
   MOZ_ASSERT(!aGlyphs.IsEmpty());
@@ -258,21 +255,12 @@ WebRenderBridgeChild::PushGlyphs(wr::DisplayListBuilder& aBuilder, const nsTArra
   wr::WrFontInstanceKey key = GetFontKeyForScaledFont(aFont);
   MOZ_ASSERT(key.mNamespace.mHandle && key.mHandle);
 
-  nsTArray<wr::GlyphInstance> wr_glyph_instances;
-  wr_glyph_instances.SetLength(aGlyphs.Length());
-
-  for (size_t j = 0; j < aGlyphs.Length(); j++) {
-    wr_glyph_instances[j].index = aGlyphs[j].mIndex;
-    wr_glyph_instances[j].point = aSc.ToRelativeLayoutPoint(
-            LayerPoint::FromUnknownPoint(aGlyphs[j].mPosition));
-  }
-
-  aBuilder.PushText(aSc.ToRelativeLayoutRect(aBounds),
-                    aSc.ToRelativeLayoutRect(aClip),
+  aBuilder.PushText(aBounds,
+                    aClip,
                     aBackfaceVisible,
                     aColor,
                     key,
-                    Range<const wr::GlyphInstance>(wr_glyph_instances.Elements(), wr_glyph_instances.Length()));
+                    Range<const wr::GlyphInstance>(aGlyphs.Elements(), aGlyphs.Length()));
 }
 
 wr::FontInstanceKey

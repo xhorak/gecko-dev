@@ -623,29 +623,18 @@ WebRenderAPI::RunOnRenderThread(UniquePtr<RendererEvent> aEvent)
 }
 
 DisplayListBuilder::DisplayListBuilder(PipelineId aId,
-                                       const wr::LayoutSize& aContentSize)
+                                       const wr::LayoutSize& aContentSize,
+                                       size_t aCapacity)
   : mMaskClipCount(0)
 {
   MOZ_COUNT_CTOR(DisplayListBuilder);
-  mWrState = wr_state_new(aId, aContentSize);
+  mWrState = wr_state_new(aId, aContentSize, aCapacity);
 }
 
 DisplayListBuilder::~DisplayListBuilder()
 {
   MOZ_COUNT_DTOR(DisplayListBuilder);
   wr_state_delete(mWrState);
-}
-
-void
-DisplayListBuilder::Begin(const LayerIntSize& aSize)
-{
-  wr_dp_begin(mWrState, aSize.width, aSize.height);
-}
-
-void
-DisplayListBuilder::End()
-{
-  wr_dp_end(mWrState);
 }
 
 void
@@ -695,7 +684,7 @@ DisplayListBuilder::PopStackingContext()
 
 wr::WrClipId
 DisplayListBuilder::DefineClip(const wr::LayoutRect& aClipRect,
-                               const nsTArray<wr::WrComplexClipRegion>* aComplex,
+                               const nsTArray<wr::ComplexClipRegion>* aComplex,
                                const wr::WrImageMask* aMask)
 {
   uint64_t clip_id = wr_dp_define_clip(mWrState, aClipRect,
@@ -763,15 +752,6 @@ DisplayListBuilder::PopStickyFrame()
 {
   WRDL_LOG("PopSticky\n", mWrState);
   wr_dp_pop_clip(mWrState);
-}
-
-void
-DisplayListBuilder::PushBuiltDisplayList(BuiltDisplayList &dl)
-{
-  WRDL_LOG("PushBuiltDisplayList\n", mWrState);
-  wr_dp_push_built_display_list(mWrState,
-                                dl.dl_desc,
-                                &dl.dl.inner);
 }
 
 bool
@@ -1052,13 +1032,13 @@ void
 DisplayListBuilder::PushText(const wr::LayoutRect& aBounds,
                              const wr::LayoutRect& aClip,
                              bool aIsBackfaceVisible,
-                             const gfx::Color& aColor,
+                             const wr::ColorF& aColor,
                              wr::FontInstanceKey aFontKey,
                              Range<const wr::GlyphInstance> aGlyphBuffer,
                              const wr::GlyphOptions* aGlyphOptions)
 {
   wr_dp_push_text(mWrState, aBounds, aClip, aIsBackfaceVisible,
-                  ToColorF(aColor),
+                  aColor,
                   aFontKey,
                   &aGlyphBuffer[0], aGlyphBuffer.length(),
                   aGlyphOptions);
@@ -1091,18 +1071,18 @@ DisplayListBuilder::PushLine(const wr::LayoutRect& aClip,
 }
 
 void
-DisplayListBuilder::PushTextShadow(const wr::LayoutRect& aRect,
-                                   const wr::LayoutRect& aClip,
-                                   bool aIsBackfaceVisible,
-                                   const wr::TextShadow& aShadow)
+DisplayListBuilder::PushShadow(const wr::LayoutRect& aRect,
+                               const wr::LayoutRect& aClip,
+                               bool aIsBackfaceVisible,
+                               const wr::Shadow& aShadow)
 {
-  wr_dp_push_text_shadow(mWrState, aRect, aClip, aIsBackfaceVisible, aShadow);
+  wr_dp_push_shadow(mWrState, aRect, aClip, aIsBackfaceVisible, aShadow);
 }
 
 void
-DisplayListBuilder::PopTextShadow()
+DisplayListBuilder::PopShadow()
 {
-  wr_dp_pop_text_shadow(mWrState);
+  wr_dp_pop_shadow(mWrState);
 }
 
 void

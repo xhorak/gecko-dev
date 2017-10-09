@@ -60,7 +60,7 @@ def buildCommandLine(test):
     # build pageloader command from options
     url = ['-tp', test['tpmanifest']]
     CLI_bool_options = ['tpchrome', 'tpmozafterpaint', 'tpdisable_e10s',
-                        'tpnoisy', 'rss', 'tprender', 'tploadnocache',
+                        'tpnoisy', 'tprender', 'tploadnocache',
                         'tpscrolltest', 'fnbpaint']
     CLI_options = ['tpcycles', 'tppagecycles', 'tpdelay', 'tptimeout']
     for key in CLI_bool_options:
@@ -110,12 +110,19 @@ def run_tests(config, browser_config):
         test['url'] = utils.interpolate(test['url'])
         test['setup'] = utils.interpolate(test['setup'])
         test['cleanup'] = utils.interpolate(test['cleanup'])
+        test['profile'] = config.get('profile')
 
     # pass --no-remote to firefox launch, if --develop is specified
     # we do that to allow locally the user to have another running firefox
     # instance
     if browser_config['develop']:
         browser_config['extra_args'] = '--no-remote'
+
+    # with addon signing for production talos, we want to develop without it
+    if browser_config['develop'] or 'try' in str.lower(browser_config['branch_name']):
+        browser_config['preferences']['xpinstall.signatures.required'] = False
+
+    browser_config['preferences']['extensions.allow-non-mpc-extensions'] = True
 
     # if using firstNonBlankPaint, must turn on pref for it
     if test.get('fnbpaint', False):

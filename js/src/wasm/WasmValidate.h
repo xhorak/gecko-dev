@@ -25,6 +25,17 @@
 namespace js {
 namespace wasm {
 
+// This struct captures the bytecode offset of a section's payload (so not
+// including the header) and the size of the payload.
+
+struct SectionRange
+{
+    uint32_t start;
+    uint32_t size;
+};
+
+typedef Maybe<SectionRange> MaybeSectionRange;
+
 // ModuleEnvironment contains all the state necessary to validate, process or
 // render functions. It is created by decoding all the sections before the wasm
 // code section and then used immutably during. When compiling a module using a
@@ -44,9 +55,10 @@ struct ModuleEnvironment
     CompileMode               mode_;
     Tier                      tier_;
 
-    // Module fields filled out incrementally during decoding:
+    // Module fields decoded from the module environment (or initialized while
+    // validating an asm.js module) and immutable during compilation:
     MemoryUsage               memoryUsage;
-    Atomic<uint32_t>          minMemoryLength;
+    uint32_t                  minMemoryLength;
     Maybe<uint32_t>           maxMemoryLength;
     SigWithIdVector           sigs;
     SigWithIdPtrVector        funcSigs;
@@ -57,6 +69,9 @@ struct ModuleEnvironment
     ImportVector              imports;
     ExportVector              exports;
     Maybe<uint32_t>           startFuncIndex;
+    MaybeSectionRange         codeSection;
+
+    // Fields decoded as part of the wasm module tail:
     ElemSegmentVector         elemSegments;
     DataSegmentVector         dataSegments;
     NameInBytecodeVector      funcNames;
@@ -98,23 +113,13 @@ struct ModuleEnvironment
         return sigs.length();
     }
     size_t numFuncs() const {
-        // asm.js pre-reserves a bunch of function index space which is
-        // incrementally filled in during function-body validation. Thus, there
-        // are a few possible interpretations of numFuncs() (total index space
-        // size vs.  exact number of imports/definitions encountered so far) and
-        // to simplify things we simply only define this quantity for wasm.
-        MOZ_ASSERT(!isAsmJS());
         return funcSigs.length();
     }
-    size_t numFuncDefs() const {
-        // asm.js overallocates the length of funcSigs and in general does not
-        // know the number of function definitions until it's done compiling.
-        MOZ_ASSERT(!isAsmJS());
-        return funcSigs.length() - funcImportGlobalDataOffsets.length();
-    }
     size_t numFuncImports() const {
-        MOZ_ASSERT(!isAsmJS());
         return funcImportGlobalDataOffsets.length();
+    }
+    size_t numFuncDefs() const {
+        return funcSigs.length() - funcImportGlobalDataOffsets.length();
     }
     bool usesMemory() const {
         return UsesMemory(memoryUsage);
@@ -560,21 +565,12 @@ class Decoder
 
     // See "section" description in Encoder.
 
-    static const uint32_t NotStarted = UINT32_MAX;
-
     MOZ_MUST_USE bool startSection(SectionId id,
                                    ModuleEnvironment* env,
-                                   uint32_t* sectionStart,
-                                   uint32_t* sectionSize,
-                                   const char* sectionName,
-                                   bool peeking = false);
-    MOZ_MUST_USE bool finishSection(uint32_t sectionStart,
-                                    uint32_t sectionSize,
+                                   MaybeSectionRange* range,
+                                   const char* sectionName);
+    MOZ_MUST_USE bool finishSection(const SectionRange& range,
                                     const char* sectionName);
-    MOZ_MUST_USE bool peekSectionSize(SectionId id,
-                                      ModuleEnvironment* env,
-                                      const char* sectionName,
-                                      uint32_t* sectionSize);
 
     // Custom sections do not cause validation errors unless the error is in
     // the section header itself.
@@ -582,24 +578,21 @@ class Decoder
     MOZ_MUST_USE bool startCustomSection(const char* expected,
                                          size_t expectedLength,
                                          ModuleEnvironment* env,
-                                         uint32_t* sectionStart,
-                                         uint32_t* sectionSize);
+                                         MaybeSectionRange* range);
     template <size_t NameSizeWith0>
     MOZ_MUST_USE bool startCustomSection(const char (&name)[NameSizeWith0],
                                          ModuleEnvironment* env,
-                                         uint32_t* sectionStart,
-                                         uint32_t* sectionSize)
+                                         MaybeSectionRange* range)
     {
         MOZ_ASSERT(name[NameSizeWith0 - 1] == '\0');
-        return startCustomSection(name, NameSizeWith0 - 1, env, sectionStart, sectionSize);
+        return startCustomSection(name, NameSizeWith0 - 1, env, range);
     }
-    void finishCustomSection(uint32_t sectionStart, uint32_t sectionSize);
+    void finishCustomSection(const SectionRange& range);
     MOZ_MUST_USE bool skipCustomSection(ModuleEnvironment* env);
 
-    // The Name section has its own subsections. Like startSection, NotStart is
-    // returned as the endOffset if the given name subsection wasn't present.
+    // The Name section has its own optional subsections.
 
-    MOZ_MUST_USE bool startNameSubsection(NameType nameType, uint32_t* endOffset);
+    MOZ_MUST_USE bool startNameSubsection(NameType nameType, Maybe<uint32_t>* endOffset);
     MOZ_MUST_USE bool finishNameSubsection(uint32_t endOffset);
 
     // The infallible "unchecked" decoding functions can be used when we are

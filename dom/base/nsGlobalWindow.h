@@ -465,9 +465,9 @@ public:
   bool IsVRContentPresenting() const;
 
   using EventTarget::EventListenerAdded;
-  virtual void EventListenerAdded(nsIAtom* aType) override;
+  virtual void EventListenerAdded(nsAtom* aType) override;
   using EventTarget::EventListenerRemoved;
-  virtual void EventListenerRemoved(nsIAtom* aType) override;
+  virtual void EventListenerRemoved(nsAtom* aType) override;
 
   // nsIInterfaceRequestor
   NS_DECL_NSIINTERFACEREQUESTOR
@@ -1165,9 +1165,9 @@ public:
   float GetMozInnerScreenYOuter(mozilla::dom::CallerType aCallerType);
   float GetMozInnerScreenY(mozilla::dom::CallerType aCallerType,
                            mozilla::ErrorResult& aError);
-  float GetDevicePixelRatioOuter(mozilla::dom::CallerType aCallerType);
-  float GetDevicePixelRatio(mozilla::dom::CallerType aCallerType,
-                            mozilla::ErrorResult& aError);
+  double GetDevicePixelRatioOuter(mozilla::dom::CallerType aCallerType);
+  double GetDevicePixelRatio(mozilla::dom::CallerType aCallerType,
+                             mozilla::ErrorResult& aError);
   int32_t GetScrollMinX(mozilla::ErrorResult& aError);
   int32_t GetScrollMinY(mozilla::ErrorResult& aError);
   int32_t GetScrollMaxX(mozilla::ErrorResult& aError);
@@ -1312,6 +1312,11 @@ public:
   mozilla::dom::Performance* GetPerformance();
 
   void UpdateTopInnerWindow();
+
+  virtual bool IsInSyncOperation() override
+  {
+    return GetExtantDoc() && GetExtantDoc()->IsInSyncOperation();
+  }
 
 protected:
   // Web IDL helpers
@@ -1982,7 +1987,7 @@ protected:
   nsCOMPtr<nsIDOMOfflineResourceList> mApplicationCache;
 
   using XBLPrototypeHandlerTable = nsJSThingHashtable<nsPtrHashKey<nsXBLPrototypeHandler>, JSObject*>;
-  nsAutoPtr<XBLPrototypeHandlerTable> mCachedXBLPrototypeHandlers;
+  mozilla::UniquePtr<XBLPrototypeHandlerTable> mCachedXBLPrototypeHandlers;
 
   // mSuspendedDoc is only set on outer windows. It's useful when we get matched
   // EnterModalState/LeaveModalState calls, in which case the outer window is
@@ -2015,7 +2020,7 @@ protected:
   nsTArray<uint32_t> mEnabledSensors;
 
 #if defined(MOZ_WIDGET_ANDROID)
-  nsAutoPtr<mozilla::dom::WindowOrientationObserver> mOrientationChangeObserver;
+  mozilla::UniquePtr<mozilla::dom::WindowOrientationObserver> mOrientationChangeObserver;
 #endif
 
 #ifdef MOZ_WEBSPEECH

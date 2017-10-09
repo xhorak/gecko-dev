@@ -67,7 +67,7 @@
  * 5. the view system handles moving of widgets, i.e., it's not our problem
  */
 
-class nsIAtom;
+class nsAtom;
 class nsPresContext;
 class nsIPresShell;
 class nsView;
@@ -2046,7 +2046,7 @@ public:
    *   The constants are defined in nsIDOMMutationEvent.h.
    */
   virtual nsresult  AttributeChanged(int32_t         aNameSpaceID,
-                                     nsIAtom*        aAttribute,
+                                     nsAtom*        aAttribute,
                                      int32_t         aModType) = 0;
 
   /**
@@ -3031,6 +3031,11 @@ public:
     PAINT_DELAYED_COMPRESS
   };
   void SchedulePaint(PaintType aType = PAINT_DEFAULT);
+
+  // Similar to SchedulePaint() but without calling
+  // InvalidateRenderingObservers() for SVG.
+  void SchedulePaintWithoutInvalidatingObservers(
+    PaintType aType = PAINT_DEFAULT);
 
   /**
    * Checks if the layer tree includes a dedicated layer for this
@@ -4442,8 +4447,6 @@ public:
 #ifdef DEBUG
 public:
   virtual nsFrameState  GetDebugStateBits() const = 0;
-  virtual nsresult  DumpRegressionData(nsPresContext* aPresContext,
-                                       FILE* out, int32_t aIndent) = 0;
 #endif
 };
 

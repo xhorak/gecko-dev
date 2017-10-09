@@ -21,13 +21,16 @@ XPCOMUtils.defineLazyServiceGetter(this, "gUUIDGenerator",
   "@mozilla.org/uuid-generator;1",
   "nsIUUIDGenerator");
 
+const ACTIVITY_STREAM_ID = "activity-stream";
 const ACTIVITY_STREAM_ENDPOINT_PREF = "browser.newtabpage.activity-stream.telemetry.ping.endpoint";
 
 // This is a mapping table between the user preferences and its encoding code
 const USER_PREFS_ENCODING = {
   "showSearch": 1 << 0,
   "showTopSites": 1 << 1,
-  "feeds.section.topstories": 1 << 2
+  "feeds.section.topstories": 1 << 2,
+  "feeds.section.highlights": 1 << 3,
+  "feeds.snippets": 1 << 4
 };
 
 const IMPRESSION_STATS_RESET_TIME = 60 * 60 * 1000; // 60 minutes
@@ -160,12 +163,10 @@ this.TelemetryFeed = class TelemetryFeed {
    * Lazily initialize PingCentre to send pings
    */
   get pingCentre() {
-    const ACTIVITY_STREAM_ID = "activity-stream";
     Object.defineProperty(this, "pingCentre",
       {
         value: new PingCentre({
           topic: ACTIVITY_STREAM_ID,
-          filter: ACTIVITY_STREAM_ID,
           overrideEndpointPref: ACTIVITY_STREAM_ENDPOINT_PREF
         })
       });
@@ -363,7 +364,8 @@ this.TelemetryFeed = class TelemetryFeed {
 
   async sendEvent(event_object) {
     if (this.telemetryEnabled) {
-      this.pingCentre.sendPing(event_object);
+      this.pingCentre.sendPing(event_object,
+      {filter: ACTIVITY_STREAM_ID});
     }
   }
 

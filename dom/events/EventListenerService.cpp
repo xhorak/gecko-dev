@@ -37,13 +37,12 @@ EventListenerChange::~EventListenerChange()
 EventListenerChange::EventListenerChange(dom::EventTarget* aTarget) :
   mTarget(aTarget)
 {
-  mChangedListenerNames = nsArrayBase::Create();
 }
 
 void
-EventListenerChange::AddChangedListenerName(nsIAtom* aEventName)
+EventListenerChange::AddChangedListenerName(nsAtom* aEventName)
 {
-  mChangedListenerNames->AppendElement(aEventName, false);
+  mChangedListenerNames.AppendElement(aEventName);
 }
 
 NS_IMETHODIMP
@@ -60,13 +59,9 @@ EventListenerChange::GetCountOfEventListenerChangesAffectingAccessibility(
 {
   *aCount = 0;
 
-  uint32_t length;
-  nsresult rv = mChangedListenerNames->GetLength(&length);
-  NS_ENSURE_SUCCESS(rv, rv);
-
+  size_t length = mChangedListenerNames.Length();
   for (size_t i = 0; i < length; i++) {
-    nsCOMPtr<nsIAtom> listenerName =
-      do_QueryElementAt(mChangedListenerNames, i);
+    RefPtr<nsAtom> listenerName = mChangedListenerNames[i];
 
     // These are the event listener changes which may make an element
     // accessible or inaccessible.
@@ -376,7 +371,7 @@ EventListenerService::RemoveListenerChangeListener(nsIListenerChangeListener* aL
 
 void
 EventListenerService::NotifyAboutMainThreadListenerChangeInternal(dom::EventTarget* aTarget,
-                                                                  nsIAtom* aName)
+                                                                  nsAtom* aName)
 {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(aTarget);

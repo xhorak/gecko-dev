@@ -1012,8 +1012,7 @@ nsPIDOMWindow<T>::nsPIDOMWindow(nsPIDOMWindowOuter *aOuterWindow)
   mLargeAllocStatus(LargeAllocStatus::NONE),
   mHasTriedToCacheTopInnerWindow(false),
   mNumOfIndexedDBDatabases(0),
-  mNumOfOpenWebSockets(0),
-  mNumOfActiveUserMedia(0)
+  mNumOfOpenWebSockets(0)
 {
   if (aOuterWindow) {
     mTimeoutManager =
@@ -4387,7 +4386,6 @@ nsGlobalWindow::UpdateTopInnerWindow()
   }
 
   mTopInnerWindow->UpdateWebSocketCount(-(int32_t)mNumOfOpenWebSockets);
-  mTopInnerWindow->UpdateUserMediaCount(-(int32_t)mNumOfActiveUserMedia);
 }
 
 void
@@ -4546,32 +4544,6 @@ nsPIDOMWindowInner::HasOpenWebSockets() const
 
   return mNumOfOpenWebSockets ||
          (mTopInnerWindow && mTopInnerWindow->mNumOfOpenWebSockets);
-}
-
-void
-nsPIDOMWindowInner::UpdateUserMediaCount(int32_t aDelta)
-{
-  MOZ_ASSERT(NS_IsMainThread());
-
-  if (aDelta == 0) {
-    return;
-  }
-
-  if (mTopInnerWindow && !IsTopInnerWindow()) {
-    mTopInnerWindow->UpdateUserMediaCount(aDelta);
-  }
-
-  MOZ_DIAGNOSTIC_ASSERT(
-    aDelta > 0 || ((aDelta + mNumOfActiveUserMedia) < mNumOfActiveUserMedia));
-
-  mNumOfActiveUserMedia += aDelta;
-}
-
-bool
-nsPIDOMWindowInner::HasActiveUserMedia() const
-{
-  return (mTopInnerWindow ? mTopInnerWindow->mNumOfActiveUserMedia
-                          : mNumOfActiveUserMedia) > 0;
 }
 
 void
@@ -6274,7 +6246,7 @@ nsGlobalWindow::GetMozInnerScreenY(CallerType aCallerType, ErrorResult& aError)
   FORWARD_TO_OUTER_OR_THROW(GetMozInnerScreenYOuter, (aCallerType), aError, 0);
 }
 
-float
+double
 nsGlobalWindow::GetDevicePixelRatioOuter(CallerType aCallerType)
 {
   MOZ_RELEASE_ASSERT(IsOuterWindow());
@@ -6299,11 +6271,11 @@ nsGlobalWindow::GetDevicePixelRatioOuter(CallerType aCallerType)
     return overrideDPPX;
   }
 
-  return float(nsPresContext::AppUnitsPerCSSPixel())/
-      presContext->AppUnitsPerDevPixel();
+  return double(nsPresContext::AppUnitsPerCSSPixel()) /
+         double(presContext->AppUnitsPerDevPixel());
 }
 
-float
+double
 nsGlobalWindow::GetDevicePixelRatio(CallerType aCallerType, ErrorResult& aError)
 {
   FORWARD_TO_OUTER_OR_THROW(GetDevicePixelRatioOuter, (aCallerType), aError, 0.0);
@@ -7088,12 +7060,12 @@ FullscreenTransitionTask::Run()
     return NS_OK;
   }
   if (stage == eBeforeToggle) {
-    profiler_add_marker("Fullscreen transition start");
+    PROFILER_ADD_MARKER("Fullscreen transition start");
     mWidget->PerformFullscreenTransition(nsIWidget::eBeforeFullscreenToggle,
                                          mDuration.mFadeIn, mTransitionData,
                                          this);
   } else if (stage == eToggleFullscreen) {
-    profiler_add_marker("Fullscreen toggle start");
+    PROFILER_ADD_MARKER("Fullscreen toggle start");
     mFullscreenChangeStartTime = TimeStamp::Now();
     if (MOZ_UNLIKELY(mWindow->mFullScreen != mFullscreen)) {
       // This could happen in theory if several fullscreen requests in
@@ -7137,7 +7109,7 @@ FullscreenTransitionTask::Run()
                                          mDuration.mFadeOut, mTransitionData,
                                          this);
   } else if (stage == eEnd) {
-    profiler_add_marker("Fullscreen transition end");
+    PROFILER_ADD_MARKER("Fullscreen transition end");
   }
   return NS_OK;
 }
@@ -7158,7 +7130,7 @@ FullscreenTransitionTask::Observer::Observe(nsISupports* aSubject,
       // The paint notification arrives first. Cancel the timer.
       mTask->mTimer->Cancel();
       shouldContinue = true;
-      profiler_add_marker("Fullscreen toggle end");
+      PROFILER_ADD_MARKER("Fullscreen toggle end");
     }
   } else {
 #ifdef DEBUG
@@ -7169,7 +7141,7 @@ FullscreenTransitionTask::Observer::Observe(nsISupports* aSubject,
                "Should only trigger this with the timer the task created");
 #endif
     shouldContinue = true;
-    profiler_add_marker("Fullscreen toggle timeout");
+    PROFILER_ADD_MARKER("Fullscreen toggle timeout");
   }
   if (shouldContinue) {
     nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
@@ -9921,7 +9893,7 @@ nsGlobalWindow::CacheXBLPrototypeHandler(nsXBLPrototypeHandler* aKey,
                                          JS::Handle<JSObject*> aHandler)
 {
   if (!mCachedXBLPrototypeHandlers) {
-    mCachedXBLPrototypeHandlers = new XBLPrototypeHandlerTable();
+    mCachedXBLPrototypeHandlers = MakeUnique<XBLPrototypeHandlerTable>();
     PreserveWrapper(ToSupports(this));
   }
 
@@ -11954,7 +11926,7 @@ nsGlobalWindow::ShowSlowScriptDialog(const nsString& aAddonId)
       }
 
       // Insert U+2026 HORIZONTAL ELLIPSIS
-      filenameUTF16.Replace(cutStart, cutLength, NS_LITERAL_STRING(u"\x2026"));
+      filenameUTF16.ReplaceLiteral(cutStart, cutLength, u"\x2026");
     }
     const char16_t *formatParams[] = { filenameUTF16.get() };
     rv = nsContentUtils::FormatLocalizedString(nsContentUtils::eDOM_PROPERTIES,
@@ -13554,7 +13526,7 @@ nsGlobalWindow::EnableOrientationChangeListener()
   if (!nsContentUtils::ShouldResistFingerprinting(mDocShell) &&
       !mOrientationChangeObserver) {
     mOrientationChangeObserver =
-      new WindowOrientationObserver(this);
+      MakeUnique<WindowOrientationObserver>(this);
   }
 }
 
@@ -13579,7 +13551,7 @@ nsGlobalWindow::SetHasGamepadEventListener(bool aHasGamepad/* = true*/)
 
 
 void
-nsGlobalWindow::EventListenerAdded(nsIAtom* aType)
+nsGlobalWindow::EventListenerAdded(nsAtom* aType)
 {
   if (aType == nsGkAtoms::onvrdisplayactivate ||
       aType == nsGkAtoms::onvrdisplayconnect ||
@@ -13611,7 +13583,7 @@ nsGlobalWindow::EventListenerAdded(nsIAtom* aType)
 }
 
 void
-nsGlobalWindow::EventListenerRemoved(nsIAtom* aType)
+nsGlobalWindow::EventListenerRemoved(nsAtom* aType)
 {
   if (aType == nsGkAtoms::onbeforeunload &&
       mTabChild &&

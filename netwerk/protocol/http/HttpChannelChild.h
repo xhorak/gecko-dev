@@ -245,7 +245,7 @@ private:
   void ProcessNotifyTrackingResource();
   void ProcessSetClassifierMatchedInfo(const nsCString& aList,
                                        const nsCString& aProvider,
-                                       const nsCString& aPrefix);
+                                       const nsCString& aFullHash);
 
 
   void DoOnStartRequest(nsIRequest* aRequest, nsISupports* aContext);
@@ -276,6 +276,12 @@ private:
   // Try invoke Cancel if on main thread, or prepend a CancelEvent in mEventQ to
   // ensure Cacnel is processed before any other channel events.
   void CancelOnMainThread(nsresult aRv);
+
+  void
+  SynthesizeResponseStartTime(const TimeStamp& aTime);
+
+  void
+  SynthesizeResponseEndTime(const TimeStamp& aTime);
 
   RequestHeaderTuples mClientSetRequestHeaders;
   RefPtr<nsInputStreamPump> mSynthesizedResponsePump;

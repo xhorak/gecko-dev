@@ -21,6 +21,7 @@
 #include "TimeRanges.h"
 #include "nsGenericHTMLElement.h"
 #include "nsAttrValueInlines.h"
+#include "nsDocShellLoadTypes.h"
 #include "nsPresContext.h"
 #include "nsIClassOfService.h"
 #include "nsIPresShell.h"
@@ -458,7 +459,7 @@ class HTMLMediaElement::MediaLoadListener final
 {
   ~MediaLoadListener() {}
 
-  NS_DECL_ISUPPORTS
+  NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIREQUESTOBSERVER
   NS_DECL_NSISTREAMLISTENER
   NS_DECL_NSICHANNELEVENTSINK
@@ -1527,10 +1528,9 @@ NS_IMPL_ENUM_ATTR_DEFAULT_VALUE(HTMLMediaElement, Preload, preload, nullptr)
 
 void
 HTMLMediaElement::ContentRemoved(nsIDocument* aDocument,
-                                 nsIContent*  aContainer,
-                                 nsIContent*  aChild,
-                                 int32_t /* aIndexInContainer */,
-                                 nsIContent*  aPreviousSibling)
+                                 nsIContent* aContainer,
+                                 nsIContent* aChild,
+                                 nsIContent* aPreviousSibling)
 {
   if (aChild == mSourcePointer) {
     mSourcePointer = aPreviousSibling;
@@ -1911,6 +1911,12 @@ void HTMLMediaElement::QueueLoadFromSourceTask()
 {
   if (!mIsLoadingFromSourceChildren || mShuttingDown) {
     return;
+  }
+
+  if (mDecoder) {
+    // Reset readyState to HAVE_NOTHING since we're going to load a new decoder.
+    ShutdownDecoder();
+    ChangeReadyState(nsIDOMHTMLMediaElement::HAVE_NOTHING);
   }
 
   ChangeDelayLoadStatus(true);
@@ -2661,6 +2667,18 @@ HTMLMediaElement::FastSeek(double aTime, ErrorResult& aRv)
 already_AddRefed<Promise>
 HTMLMediaElement::SeekToNextFrame(ErrorResult& aRv)
 {
+  /* This will cause JIT code to be kept around longer, to help performance
+   * when using SeekToNextFrame to iterate through every frame of a video.
+   */
+  nsCOMPtr<nsIGlobalObject> global =
+    do_QueryInterface(OwnerDoc()->GetInnerWindow());
+
+  if (global) {
+    if (JSObject *obj = global->GetGlobalJSObject()) {
+      js::NotifyAnimationActivity(obj);
+    }
+  }
+
   return Seek(CurrentTime(), SeekTarget::NextFrame, aRv);
 }
 
@@ -3727,7 +3745,7 @@ HTMLMediaElement::AddMediaElementToURITable()
 }
 
 void
-HTMLMediaElement::RemoveMediaElementFromURITable()
+HTMLMediaElement::RemoveMediaElementFromURITable(bool aFroceClearEntry)
 {
   if (!mDecoder || !mLoadingSrc || !gElementTable) {
     return;
@@ -3736,13 +3754,17 @@ HTMLMediaElement::RemoveMediaElementFromURITable()
   if (!entry) {
     return;
   }
-  entry->mElements.RemoveElement(this);
-  if (entry->mElements.IsEmpty()) {
+  if (aFroceClearEntry) {
     gElementTable->RemoveEntry(entry);
-    if (gElementTable->Count() == 0) {
-      delete gElementTable;
-      gElementTable = nullptr;
+  } else {
+    entry->mElements.RemoveElement(this);
+    if (entry->mElements.IsEmpty()) {
+      gElementTable->RemoveEntry(entry);
     }
+  }
+  if (gElementTable->Count() == 0) {
+    delete gElementTable;
+    gElementTable = nullptr;
   }
   NS_ASSERTION(MediaElementTableCount(this, mLoadingSrc) == 0,
     "After remove, should no longer have an entry in element table");
@@ -3834,6 +3856,106 @@ private:
 
 NS_IMPL_ISUPPORTS(HTMLMediaElement::ShutdownObserver, nsIObserver)
 
+class HTMLMediaElement::ForceReloadListener : public nsIWebProgressListener
+                                            , public nsSupportsWeakReference
+{
+public:
+  NS_DECL_ISUPPORTS
+
+  void Subscribe(HTMLMediaElement* aPtr, nsIWebProgress* aWebProgress)
+  {
+    MOZ_DIAGNOSTIC_ASSERT(!mWeak);
+    MOZ_DIAGNOSTIC_ASSERT(aWebProgress);
+    mWeak = aPtr;
+    aWebProgress->AddProgressListener(this,
+                                      nsIWebProgress::NOTIFY_STATE_NETWORK);
+  }
+  void Unsubscribe(nsIWebProgress* aWebProgress)
+  {
+    MOZ_DIAGNOSTIC_ASSERT(mWeak);
+    mWeak = nullptr;
+    if (aWebProgress) {
+      aWebProgress->RemoveProgressListener(this);
+    }
+  }
+
+  NS_IMETHODIMP OnStateChange(nsIWebProgress* aWebProgress,
+                              nsIRequest* aRequest,
+                              uint32_t aProgressStateFlags,
+                              nsresult aStatus) override
+  {
+    MOZ_DIAGNOSTIC_ASSERT(mWeak);
+    if ((aProgressStateFlags & STATE_IS_NETWORK) &&
+        (aProgressStateFlags & STATE_START)) {
+      // Query the LoadType to see if it's a ctrl+F5.
+      nsCOMPtr<nsIDocShell> shell(do_QueryInterface(aWebProgress));
+      if (shell) {
+        uint32_t loadType;
+        shell->GetLoadType(&loadType);
+        if (LOAD_RELOAD_BYPASS_PROXY_AND_CACHE == loadType && mWeak->mDecoder) {
+          mWeak->RemoveMediaElementFromURITable(true);
+          mWeak->ShutdownDecoder();
+        }
+      }
+    }
+    return NS_OK;
+  }
+
+  NS_IMETHODIMP
+  OnProgressChange(nsIWebProgress* aProgress,
+                   nsIRequest* aRequest,
+                   int32_t aCurSelfProgress,
+                   int32_t aMaxSelfProgress,
+                   int32_t aCurTotalProgress,
+                   int32_t aMaxTotalProgress) override
+  {
+    NS_NOTREACHED("notification excluded in AddProgressListener(...)");
+    return NS_OK;
+  }
+
+  NS_IMETHODIMP
+  OnLocationChange(nsIWebProgress* aWebProgress,
+                   nsIRequest* aRequest,
+                   nsIURI* aLocation,
+                   uint32_t aFlags) override
+  {
+    NS_NOTREACHED("notification excluded in AddProgressListener(...)");
+    return NS_OK;
+  }
+
+  NS_IMETHODIMP
+  OnStatusChange(nsIWebProgress* aWebProgress,
+                 nsIRequest* aRequest,
+                 nsresult aStatus,
+                 const char16_t* aMessage) override
+  {
+    NS_NOTREACHED("notification excluded in AddProgressListener(...)");
+    return NS_OK;
+  }
+
+  NS_IMETHODIMP
+  OnSecurityChange(nsIWebProgress* aWebProgress,
+                   nsIRequest* aRequest,
+                   uint32_t aState) override
+  {
+    NS_NOTREACHED("notification excluded in AddProgressListener(...)");
+    return NS_OK;
+  }
+
+protected:
+  virtual ~ForceReloadListener()
+  {
+    MOZ_DIAGNOSTIC_ASSERT(!mWeak);
+  }
+
+private:
+  HTMLMediaElement* mWeak = nullptr;
+};
+
+NS_IMPL_ISUPPORTS(HTMLMediaElement::ForceReloadListener,
+                  nsIWebProgressListener,
+                  nsISupportsWeakReference)
+
 HTMLMediaElement::HTMLMediaElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo)
   : nsGenericHTMLElement(aNodeInfo),
     mMainThreadEventTarget(OwnerDoc()->EventTargetFor(TaskCategory::Other)),
@@ -3917,14 +4039,33 @@ HTMLMediaElement::HTMLMediaElement(already_AddRefed<mozilla::dom::NodeInfo>& aNo
   mWatchManager.Watch(mReadyState, &HTMLMediaElement::UpdateReadyStateInternal);
 
   mShutdownObserver->Subscribe(this);
+  nsIDocShell* docShell = OwnerDoc()->GetDocShell();
+  if (docShell) {
+    nsCOMPtr<nsIDocShellTreeItem> root;
+    docShell->GetSameTypeRootTreeItem(getter_AddRefs(root));
+    nsCOMPtr<nsIWebProgress> webProgress = do_GetInterface(root);
+    if (webProgress) {
+      mForceReloadListener = new ForceReloadListener();
+      mForceReloadListener->Subscribe(this, webProgress);
+    }
+  }
 }
 
 HTMLMediaElement::~HTMLMediaElement()
 {
   NS_ASSERTION(!mHasSelfReference,
                "How can we be destroyed if we're still holding a self reference?");
-
   mShutdownObserver->Unsubscribe();
+  nsIDocShell* docShell = OwnerDoc()->GetDocShell();
+  nsCOMPtr<nsIWebProgress> webProgress;
+  if (docShell) {
+    nsCOMPtr<nsIDocShellTreeItem> root;
+    docShell->GetSameTypeRootTreeItem(getter_AddRefs(root));
+    webProgress = do_GetInterface(root);
+  }
+  if (mForceReloadListener) {
+    mForceReloadListener->Unsubscribe(webProgress);
+  }
 
   if (mVideoFrameContainer) {
     mVideoFrameContainer->ForgetElement();
@@ -4251,7 +4392,7 @@ HTMLMediaElement::OutputMediaStream::~OutputMediaStream()
 }
 
 bool HTMLMediaElement::ParseAttribute(int32_t aNamespaceID,
-                                      nsIAtom* aAttribute,
+                                      nsAtom* aAttribute,
                                       const nsAString& aValue,
                                       nsAttrValue& aResult)
 {
@@ -4306,7 +4447,7 @@ int32_t HTMLMediaElement::TabIndexDefault()
 }
 
 nsresult
-HTMLMediaElement::AfterSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
+HTMLMediaElement::AfterSetAttr(int32_t aNameSpaceID, nsAtom* aName,
                                 const nsAttrValue* aValue,
                                 const nsAttrValue* aOldValue, bool aNotify)
 {
@@ -4358,7 +4499,7 @@ HTMLMediaElement::AfterSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
 }
 
 nsresult
-HTMLMediaElement::OnAttrSetButNotChanged(int32_t aNamespaceID, nsIAtom* aName,
+HTMLMediaElement::OnAttrSetButNotChanged(int32_t aNamespaceID, nsAtom* aName,
                                          const nsAttrValueOrString& aValue,
                                          bool aNotify)
 {
@@ -4369,7 +4510,7 @@ HTMLMediaElement::OnAttrSetButNotChanged(int32_t aNamespaceID, nsIAtom* aName,
 }
 
 void
-HTMLMediaElement::AfterMaybeChangeAttr(int32_t aNamespaceID, nsIAtom* aName,
+HTMLMediaElement::AfterMaybeChangeAttr(int32_t aNamespaceID, nsAtom* aName,
                                        bool aNotify)
 {
   if (aNamespaceID == kNameSpaceID_None) {
@@ -4721,6 +4862,7 @@ HTMLMediaElement::InitializeDecoderAsClone(ChannelMediaDecoder* aOriginal)
 {
   NS_ASSERTION(mLoadingSrc, "mLoadingSrc must already be set");
   NS_ASSERTION(mDecoder == nullptr, "Shouldn't have a decoder");
+  MOZ_DIAGNOSTIC_ASSERT(mReadyState == nsIDOMHTMLMediaElement::HAVE_NOTHING);
 
   MediaDecoderInit decoderInit(this,
                                mMuted ? 0.0 : mVolume,
@@ -4774,6 +4916,7 @@ nsresult HTMLMediaElement::InitializeDecoderForChannel(nsIChannel* aChannel,
                                                        nsIStreamListener** aListener)
 {
   NS_ASSERTION(mLoadingSrc, "mLoadingSrc must already be set");
+  MOZ_DIAGNOSTIC_ASSERT(mReadyState == nsIDOMHTMLMediaElement::HAVE_NOTHING);
 
   DecoderDoctorDiagnostics diagnostics;
 
@@ -7023,7 +7166,7 @@ HTMLMediaElement::DispatchEncrypted(const nsTArray<uint8_t>& aInitData,
 }
 
 bool
-HTMLMediaElement::IsEventAttributeNameInternal(nsIAtom* aName)
+HTMLMediaElement::IsEventAttributeNameInternal(nsAtom* aName)
 {
   return aName == nsGkAtoms::onencrypted ||
          nsGenericHTMLElement::IsEventAttributeNameInternal(aName);

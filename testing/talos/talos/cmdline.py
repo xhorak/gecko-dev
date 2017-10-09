@@ -73,9 +73,6 @@ def create_parser(mach_interface=False):
             help="disable e10s")
     add_arg('--noChrome', action='store_true',
             help="do not run tests as chrome")
-    add_arg('--rss', action='store_true',
-            help="Collect RSS counters from pageloader instead of the"
-                 " operating system")
     add_arg('--mainthread', action='store_true',
             help="Collect mainthread IO data from the browser by setting"
                  " an environment variable")
@@ -179,7 +176,8 @@ def create_parser(mach_interface=False):
     add_arg('--stylo-threads', type=int,
             dest='stylothreads',
             help='If given, run Stylo with a certain number of threads')
-
+    add_arg('--profile', type=str, default=None,
+            help="Downloads a profile from TaskCluster and uses it")
     add_logging_group(parser)
     return parser
 

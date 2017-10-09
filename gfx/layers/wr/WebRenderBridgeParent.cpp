@@ -64,6 +64,15 @@ bool gfx_use_wrench()
   return gfxEnv::EnableWebRenderRecording();
 }
 
+const char* gfx_wr_resource_path_override()
+{
+  const char* resourcePath = PR_GetEnv("WR_RESOURCE_PATH");
+  if (!resourcePath || resourcePath[0] == '\0') {
+    return nullptr;
+  }
+  return resourcePath;
+}
+
 void gfx_critical_note(const char* msg)
 {
   gfxCriticalNote << msg;
@@ -449,7 +458,7 @@ WebRenderBridgeParent::GetRootCompositorBridgeParent() const
 }
 
 void
-WebRenderBridgeParent::UpdateAPZ()
+WebRenderBridgeParent::UpdateAPZ(bool aUpdateHitTestingTree)
 {
   CompositorBridgeParent* cbp = GetRootCompositorBridgeParent();
   if (!cbp) {
@@ -463,9 +472,11 @@ WebRenderBridgeParent::UpdateAPZ()
   if (RefPtr<APZCTreeManager> apzc = cbp->GetAPZCTreeManager()) {
     apzc->UpdateFocusState(rootLayersId, GetLayersId(),
                            mScrollData.GetFocusTarget());
-    apzc->UpdateHitTestingTree(rootLayersId, rootWrbp->GetScrollData(),
-        mScrollData.IsFirstPaint(), GetLayersId(),
-        mScrollData.GetPaintSequenceNumber());
+    if (aUpdateHitTestingTree) {
+      apzc->UpdateHitTestingTree(rootLayersId, rootWrbp->GetScrollData(),
+          mScrollData.IsFirstPaint(), GetLayersId(),
+          mScrollData.GetPaintSequenceNumber());
+    }
   }
 }
 
@@ -523,7 +534,7 @@ WebRenderBridgeParent::RecvSetDisplayList(const gfx::IntSize& aSize,
     return IPC_OK();
   }
 
-  AutoProfilerTracing tracing("Paint", "SetDisplayList");
+  AUTO_PROFILER_TRACING("Paint", "SetDisplayList");
   UpdateFwdTransactionId(aFwdTransactionId);
   AutoClearReadLocks clearLocks(mReadLocks);
 
@@ -533,12 +544,10 @@ WebRenderBridgeParent::RecvSetDisplayList(const gfx::IntSize& aSize,
 
   uint32_t wrEpoch = GetNextWrEpoch();
 
+  mAsyncImageManager->SetCompositionTime(TimeStamp::Now());
+  ProcessWebRenderParentCommands(aCommands);
 
   wr::ResourceUpdateQueue resources;
-
-  mAsyncImageManager->SetCompositionTime(TimeStamp::Now());
-  ProcessWebRenderParentCommands(aCommands, resources);
-
   if (!UpdateResources(aResourceUpdates, aSmallShmems, aLargeShmems, resources)) {
     return IPC_FAIL(this, "Failed to deserialize resource updates");
   }
@@ -551,8 +560,8 @@ WebRenderBridgeParent::RecvSetDisplayList(const gfx::IntSize& aSize,
       LayoutDeviceIntSize size = mWidget->GetClientSize();
       mApi->SetWindowParameters(size);
     }
-    gfx::Color color = mWidget ? gfx::Color(0.3f, 0.f, 0.f, 1.f) : gfx::Color(0.f, 0.f, 0.f, 0.f);
-    mApi->SetDisplayList(color, wr::NewEpoch(wrEpoch), LayerSize(aSize.width, aSize.height),
+    gfx::Color clearColor(0.f, 0.f, 0.f, 0.f);
+    mApi->SetDisplayList(clearColor, wr::NewEpoch(wrEpoch), LayerSize(aSize.width, aSize.height),
                         mPipelineId, aContentSize,
                         dlDesc, dl.mData, dl.mLength,
                         resources);
@@ -567,7 +576,7 @@ WebRenderBridgeParent::RecvSetDisplayList(const gfx::IntSize& aSize,
   HoldPendingTransactionId(wrEpoch, aTransactionId, aTxnStartTime, aFwdTime);
 
   mScrollData = aScrollData;
-  UpdateAPZ();
+  UpdateAPZ(true);
 
   if (mIdNamespace != aIdNamespace) {
     // Pretend we composited since someone is wating for this event,
@@ -606,20 +615,25 @@ WebRenderBridgeParent::RecvSetDisplayListSync(const gfx::IntSize &aSize,
 }
 
 mozilla::ipc::IPCResult
+WebRenderBridgeParent::RecvSetFocusTarget(const FocusTarget& aFocusTarget)
+{
+  mScrollData.SetFocusTarget(aFocusTarget);
+  UpdateAPZ(false);
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult
 WebRenderBridgeParent::RecvParentCommands(nsTArray<WebRenderParentCommand>&& aCommands)
 {
   if (mDestroyed) {
     return IPC_OK();
   }
-  wr::ResourceUpdateQueue resources;
-  ProcessWebRenderParentCommands(aCommands, resources);
-  mApi->UpdateResources(resources);
+  ProcessWebRenderParentCommands(aCommands);
   return IPC_OK();
 }
 
 void
-WebRenderBridgeParent::ProcessWebRenderParentCommands(const InfallibleTArray<WebRenderParentCommand>& aCommands,
-                                                      wr::ResourceUpdateQueue& aResources)
+WebRenderBridgeParent::ProcessWebRenderParentCommands(const InfallibleTArray<WebRenderParentCommand>& aCommands)
 {
   for (InfallibleTArray<WebRenderParentCommand>::index_type i = 0; i < aCommands.Length(); ++i) {
     const WebRenderParentCommand& cmd = aCommands[i];
@@ -1073,7 +1087,7 @@ WebRenderBridgeParent::SampleAnimations(nsTArray<wr::WrOpacityProperty>& aOpacit
 void
 WebRenderBridgeParent::CompositeToTarget(gfx::DrawTarget* aTarget, const gfx::IntRect* aRect)
 {
-  AutoProfilerTracing tracing("Paint", "CompositeToTraget");
+  AUTO_PROFILER_TRACING("Paint", "CompositeToTraget");
   if (mPaused) {
     return;
   }

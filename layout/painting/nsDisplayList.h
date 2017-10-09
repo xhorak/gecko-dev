@@ -64,7 +64,6 @@ class ImageLayer;
 class ImageContainer;
 class StackingContextHelper;
 class WebRenderCommand;
-class WebRenderDisplayItemLayer;
 class WebRenderScrollData;
 class WebRenderLayerScrollData;
 } // namespace layers
@@ -586,6 +585,7 @@ public:
 
   bool HaveScrollableDisplayPort() const { return mHaveScrollableDisplayPort; }
   void SetHaveScrollableDisplayPort() { mHaveScrollableDisplayPort = true; }
+  void ClearHaveScrollableDisplayPort() { mHaveScrollableDisplayPort = false; }
 
   bool SetIsCompositingCheap(bool aCompositingCheap) {
     bool temp = mIsCompositingCheap;
@@ -688,9 +688,7 @@ public:
 
   /**
    * Subtracts aRegion from *aVisibleRegion. We avoid letting
-   * aVisibleRegion become overcomplex by simplifying it if necessary ---
-   * unless mAccurateVisibleRegions is set, in which case we let it
-   * get arbitrarily complex.
+   * aVisibleRegion become overcomplex by simplifying it if necessary.
    */
   void SubtractFromVisibleRegion(nsRegion* aVisibleRegion,
                                  const nsRegion& aRegion);
@@ -1577,7 +1575,6 @@ private:
   bool                           mIncludeAllOutOfFlows;
   bool                           mDescendIntoSubdocuments;
   bool                           mSelectedFramesOnly;
-  bool                           mAccurateVisibleRegions;
   bool                           mAllowMergingAndFlattening;
   bool                           mWillComputePluginGeometry;
   // True when we're building a display list that's directly or indirectly
@@ -1650,7 +1647,6 @@ public:
   typedef mozilla::layers::StackingContextHelper StackingContextHelper;
   typedef mozilla::layers::WebRenderCommand WebRenderCommand;
   typedef mozilla::layers::WebRenderParentCommand WebRenderParentCommand;
-  typedef mozilla::layers::WebRenderDisplayItemLayer WebRenderDisplayItemLayer;
   typedef mozilla::LayerState LayerState;
   typedef mozilla::image::imgDrawingParams imgDrawingParams;
   typedef mozilla::image::DrawResult DrawResult;
@@ -1672,6 +1668,7 @@ public:
     , mClip(nullptr)
     , mActiveScrolledRoot(nullptr)
     , mReferenceFrame(nullptr)
+    , mAnimatedGeometryRoot(nullptr)
     , mForceNotVisible(false)
     , mDisableSubpixelAA(false)
 #ifdef MOZ_DUMP_PAINTING
@@ -1720,6 +1717,9 @@ public:
     , mVisibleRect(aOther.mVisibleRect)
     , mForceNotVisible(aOther.mForceNotVisible)
     , mDisableSubpixelAA(aOther.mDisableSubpixelAA)
+#ifdef MOZ_DUMP_PAINTING
+    , mPainted(false)
+#endif
   {
   }
 
@@ -2043,10 +2043,8 @@ public:
   }
 
   /**
-   * Function to create the WebRenderCommands without
-   * Layer. For layers mode, aManager->IsLayersFreeTransaction()
-   * should be false to prevent doing GetLayerState again. For
-   * layers-free mode, we should check if the layer state is
+   * Function to create the WebRenderCommands.
+   * We should check if the layer state is
    * active first and have an early return if the layer state is
    * not active.
    *
@@ -4428,6 +4426,7 @@ public:
     , mScrollTarget(aOther.mFlags)
     , mThumbData(aOther.mThumbData)
     , mForceActive(aOther.mForceActive)
+    , mWrAnimationId(aOther.mWrAnimationId)
   {
     MOZ_COUNT_CTOR(nsDisplayOwnLayer);
   }
@@ -5511,7 +5510,7 @@ public:
     : nsDisplayItem(aBuilder, aFrame), mVisIStartEdge(0), mVisIEndEdge(0) {}
 
   explicit nsCharClipDisplayItem(nsIFrame* aFrame)
-    : nsDisplayItem(aFrame) {}
+    : nsDisplayItem(aFrame), mVisIStartEdge(0), mVisIEndEdge(0) {}
 
   virtual nsDisplayItemGeometry* AllocateGeometry(nsDisplayListBuilder* aBuilder) override;
 

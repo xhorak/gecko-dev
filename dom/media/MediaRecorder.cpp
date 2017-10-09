@@ -9,7 +9,6 @@
 #include "AudioNodeEngine.h"
 #include "AudioNodeStream.h"
 #include "DOMMediaStream.h"
-#include "EncodedBufferCache.h"
 #include "GeckoProfiler.h"
 #include "MediaDecoder.h"
 #include "MediaEncoder.h"
@@ -19,6 +18,7 @@
 #include "mozilla/dom/BlobEvent.h"
 #include "mozilla/dom/File.h"
 #include "mozilla/dom/MediaRecorderErrorEvent.h"
+#include "mozilla/dom/MutableBlobStorage.h"
 #include "mozilla/dom/VideoStreamTrack.h"
 #include "mozilla/media/MediaUtils.h"
 #include "mozilla/MemoryReporting.h"
@@ -158,11 +158,11 @@ NS_IMPL_RELEASE_INHERITED(MediaRecorder, DOMEventTargetHelper)
 /**
  * Session is an object to represent a single recording event.
  * In original design, all recording context is stored in MediaRecorder, which causes
- * a problem if someone calls MediaRecoder::Stop and MedaiRecorder::Start quickly.
+ * a problem if someone calls MediaRecorder::Stop and MediaRecorder::Start quickly.
  * To prevent blocking main thread, media encoding is executed in a second thread,
  * named as Read Thread. For the same reason, we do not wait Read Thread shutdown in
- * MediaRecorder::Stop. If someone call MediaRecoder::Start before Read Thread shutdown,
- * the same recording context in MediaRecoder might be access by two Reading Threads,
+ * MediaRecorder::Stop. If someone call MediaRecorder::Start before Read Thread shutdown,
+ * the same recording context in MediaRecorder might be access by two Reading Threads,
  * which cause a  problem.
  * In the new design, we put recording context into Session object, including Read
  * Thread.  Each Session has its own recording context and Read Thread, problem is been
@@ -201,11 +201,17 @@ class MediaRecorder::Session: public PrincipalChangeObserver<MediaStreamTrack>,
   // Main thread task.
   // Create a blob event and send back to client.
   class PushBlobRunnable : public Runnable
+                         , public MutableBlobStorageCallback
   {
   public:
-    explicit PushBlobRunnable(Session* aSession)
+    NS_DECL_ISUPPORTS_INHERITED
+
+    // aDestroyRunnable can be null. If it's not, it will be dispatched after
+    // the PushBlobRunnable::Run().
+    PushBlobRunnable(Session* aSession, Runnable* aDestroyRunnable)
       : Runnable("dom::MediaRecorder::Session::PushBlobRunnable")
       , mSession(aSession)
+      , mDestroyRunnable(aDestroyRunnable)
     { }
 
     NS_IMETHOD Run() override
@@ -213,21 +219,72 @@ class MediaRecorder::Session: public PrincipalChangeObserver<MediaStreamTrack>,
       LOG(LogLevel::Debug, ("Session.PushBlobRunnable s=(%p)", mSession.get()));
       MOZ_ASSERT(NS_IsMainThread());
 
+      mSession->GetBlobWhenReady(this);
+      return NS_OK;
+    }
+
+    void
+    BlobStoreCompleted(MutableBlobStorage* aBlobStorage, Blob* aBlob,
+                       nsresult aRv) override
+    {
       RefPtr<MediaRecorder> recorder = mSession->mRecorder;
       if (!recorder) {
-        return NS_OK;
+        return;
       }
 
-      nsresult rv = recorder->CreateAndDispatchBlobEvent(mSession->GetEncodedData());
+      if (NS_FAILED(aRv)) {
+        recorder->NotifyError(aRv);
+        return;
+      }
+
+      nsresult rv = recorder->CreateAndDispatchBlobEvent(aBlob);
       if (NS_FAILED(rv)) {
-        recorder->NotifyError(rv);
+        recorder->NotifyError(aRv);
+      }
+
+      if (mDestroyRunnable &&
+          NS_FAILED(NS_DispatchToMainThread(mDestroyRunnable.forget()))) {
+        MOZ_ASSERT(false, "NS_DispatchToMainThread failed");
+      }
+    }
+
+  private:
+    ~PushBlobRunnable() = default;
+
+    RefPtr<Session> mSession;
+
+    // The generation of the blob is async. In order to avoid dispatching the
+    // DestroyRunnable before pushing the blob event, we store the runnable
+    // here.
+    RefPtr<Runnable> mDestroyRunnable;
+  };
+
+  class StoreEncodedBufferRunnable final : public Runnable
+  {
+    RefPtr<Session> mSession;
+    nsTArray<nsTArray<uint8_t>> mBuffer;
+
+  public:
+    StoreEncodedBufferRunnable(Session* aSession,
+                               nsTArray<nsTArray<uint8_t>>&& aBuffer)
+      : Runnable("StoreEncodedBufferRunnable")
+      , mSession(aSession)
+      , mBuffer(Move(aBuffer))
+    {}
+
+    NS_IMETHOD
+    Run() override
+    {
+      mSession->MaybeCreateMutableBlobStorage();
+      for (uint32_t i = 0; i < mBuffer.Length(); i++) {
+        if (!mBuffer[i].IsEmpty()) {
+          mSession->mMutableBlobStorage->Append(mBuffer[i].Elements(),
+                                                mBuffer[i].Length());
+        }
       }
 
       return NS_OK;
     }
-
-  private:
-    RefPtr<Session> mSession;
   };
 
   // Notify encoder error, run in main thread task. (Bug 1095381)
@@ -433,9 +490,8 @@ public:
   {
     MOZ_ASSERT(NS_IsMainThread());
 
-    uint32_t maxMem = Preferences::GetUint("media.recorder.max_memory",
-                                           MAX_ALLOW_MEMORY_BUFFER);
-    mEncodedBufferCache = new EncodedBufferCache(maxMem);
+    mMaxMemory = Preferences::GetUint("media.recorder.max_memory",
+                                      MAX_ALLOW_MEMORY_BUFFER);
     mLastBlobTimeStamp = TimeStamp::Now();
   }
 
@@ -551,7 +607,7 @@ public:
     LOG(LogLevel::Debug, ("Session.RequestData"));
     MOZ_ASSERT(NS_IsMainThread());
 
-    if (NS_FAILED(NS_DispatchToMainThread(new PushBlobRunnable(this)))) {
+    if (NS_FAILED(NS_DispatchToMainThread(new PushBlobRunnable(this, nullptr)))) {
       MOZ_ASSERT(false, "RequestData NS_DispatchToMainThread failed");
       return NS_ERROR_FAILURE;
     }
@@ -559,19 +615,35 @@ public:
     return NS_OK;
   }
 
-  already_AddRefed<nsIDOMBlob> GetEncodedData()
+  void
+  MaybeCreateMutableBlobStorage()
+  {
+    if (!mMutableBlobStorage) {
+      mMutableBlobStorage =
+        new MutableBlobStorage(MutableBlobStorage::eCouldBeInTemporaryFile,
+                               nullptr, mMaxMemory);
+    }
+  }
+
+  void
+  GetBlobWhenReady(MutableBlobStorageCallback* aCallback)
   {
     MOZ_ASSERT(NS_IsMainThread());
-    return mEncodedBufferCache->ExtractBlob(mRecorder->GetParentObject(),
-                                            mMimeType);
+
+    MaybeCreateMutableBlobStorage();
+    mMutableBlobStorage->GetBlobWhenReady(mRecorder->GetParentObject(),
+                                          NS_ConvertUTF16toUTF8(mMimeType),
+                                          aCallback);
+    mMutableBlobStorage = nullptr;
   }
 
   RefPtr<SizeOfPromise>
   SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf)
   {
     MOZ_ASSERT(NS_IsMainThread());
-    size_t encodedBufferSize =
-      mEncodedBufferCache->SizeOfExcludingThis(aMallocSizeOf);
+    size_t encodedBufferSize = mMutableBlobStorage
+                                 ? mMutableBlobStorage->SizeOfCurrentMemoryBuffer()
+                                 : 0;
 
     if (!mEncoder) {
       return SizeOfPromise::CreateAndResolve(encodedBufferSize, __func__);
@@ -593,11 +665,11 @@ private:
     MOZ_ASSERT(mShutdownPromise);
     LOG(LogLevel::Debug, ("Session.~Session (%p)", this));
   }
-  // Pull encoded media data from MediaEncoder and put into EncodedBufferCache.
+  // Pull encoded media data from MediaEncoder and put into MutableBlobStorage.
   // Destroy this session object in the end of this function.
   // If the bool aForceFlush is true, we will force to dispatch a
   // PushBlobRunnable to main thread.
-  void Extract(bool aForceFlush)
+  void Extract(bool aForceFlush, Runnable* aDestroyRunnable)
   {
     MOZ_ASSERT(mEncoderThread->IsCurrentThreadIn());
 
@@ -615,11 +687,8 @@ private:
     }
 
     // Append pulled data into cache buffer.
-    for (uint32_t i = 0; i < encodedBuf.Length(); i++) {
-      if (!encodedBuf[i].IsEmpty()) {
-        mEncodedBufferCache->AppendBuffer(encodedBuf[i]);
-      }
-    }
+    NS_DispatchToMainThread(new StoreEncodedBufferRunnable(this,
+                                                           Move(encodedBuf)));
 
     // Whether push encoded data back to onDataAvailable automatically or we
     // need a flush.
@@ -630,10 +699,14 @@ private:
       pushBlob = true;
     }
     if (pushBlob) {
-      if (NS_FAILED(NS_DispatchToMainThread(new PushBlobRunnable(this)))) {
+      if (NS_FAILED(NS_DispatchToMainThread(new PushBlobRunnable(this, aDestroyRunnable)))) {
         MOZ_ASSERT(false, "NS_DispatchToMainThread PushBlobRunnable failed");
       } else {
         mLastBlobTimeStamp = TimeStamp::Now();
+      }
+    } else if (aDestroyRunnable) {
+      if (NS_FAILED(NS_DispatchToMainThread(aDestroyRunnable))) {
+        MOZ_ASSERT(false, "NS_DispatchToMainThread DestroyRunnable failed");
       }
     }
   }
@@ -894,15 +967,20 @@ private:
                                     &MediaRecorder::NotifyError,
                                     rv));
     }
+
+    RefPtr<Runnable> destroyRunnable = new DestroyRunnable(this);
+
     if (rv != NS_ERROR_DOM_SECURITY_ERR) {
       // Don't push a blob if there was a security error.
-      if (NS_FAILED(NS_DispatchToMainThread(new PushBlobRunnable(this)))) {
+      if (NS_FAILED(NS_DispatchToMainThread(new PushBlobRunnable(this, destroyRunnable)))) {
         MOZ_ASSERT(false, "NS_DispatchToMainThread PushBlobRunnable failed");
       }
+    } else {
+      if (NS_FAILED(NS_DispatchToMainThread(destroyRunnable))) {
+        MOZ_ASSERT(false, "NS_DispatchToMainThread DestroyRunnable failed");
+      }
     }
-    if (NS_FAILED(NS_DispatchToMainThread(new DestroyRunnable(this)))) {
-      MOZ_ASSERT(false, "NS_DispatchToMainThread DestroyRunnable failed");
-    }
+
     mNeedSessionEndTask = false;
   }
 
@@ -919,11 +997,8 @@ private:
     }
 
     // Append pulled data into cache buffer.
-    for (uint32_t i = 0; i < encodedBuf.Length(); i++) {
-      if (!encodedBuf[i].IsEmpty()) {
-        mEncodedBufferCache->AppendBuffer(encodedBuf[i]);
-      }
-    }
+    NS_DispatchToMainThread(new StoreEncodedBufferRunnable(this,
+                                                           Move(encodedBuf)));
   }
 
   void MediaEncoderDataAvailable()
@@ -936,7 +1011,7 @@ private:
       mIsStartEventFired = true;
     }
 
-    Extract(false);
+    Extract(false, nullptr);
   }
 
   void MediaEncoderError()
@@ -953,14 +1028,11 @@ private:
     MOZ_ASSERT(mEncoderThread->IsCurrentThreadIn());
     MOZ_ASSERT(mEncoder->IsShutdown());
 
-    // Forces the last blob even if it's not time for it yet.
-    Extract(true);
+    // For the stop event. Let's the creation of the blob to dispatch this runnable.
+    RefPtr<Runnable> destroyRunnable = new DestroyRunnable(this);
 
-    // For the stop event.
-    if (NS_FAILED(NS_DispatchToMainThread(
-                  new DestroyRunnable(this)))) {
-      MOZ_ASSERT(false, "NS_DispatchToMainThread DestroyRunnable failed");
-    }
+    // Forces the last blob even if it's not time for it yet.
+    Extract(true, destroyRunnable);
 
     // Clean up.
     mEncoderListener->Forget();
@@ -1045,7 +1117,7 @@ private:
   }
 
 private:
-  // Hold reference to MediaRecoder that ensure MediaRecorder is alive
+  // Hold reference to MediaRecorder that ensure MediaRecorder is alive
   // if there is an active session. Access ONLY on main thread.
   RefPtr<MediaRecorder> mRecorder;
 
@@ -1065,15 +1137,17 @@ private:
   // Set in Shutdown() and resolved when shutdown is complete.
   RefPtr<ShutdownPromise> mShutdownPromise;
   // A buffer to cache encoded media data.
-  nsAutoPtr<EncodedBufferCache> mEncodedBufferCache;
+  RefPtr<MutableBlobStorage> mMutableBlobStorage;
+  // Max memory to use for the MutableBlobStorage.
+  uint64_t mMaxMemory;
   // Current session mimeType
   nsString mMimeType;
   // Timestamp of the last fired dataavailable event.
   TimeStamp mLastBlobTimeStamp;
-  // The interval of passing encoded data from EncodedBufferCache to onDataAvailable
-  // handler. "mTimeSlice < 0" means Session object does not push encoded data to
-  // onDataAvailable, instead, it passive wait the client side pull encoded data
-  // by calling requestData API.
+  // The interval of passing encoded data from MutableBlobStorage to
+  // onDataAvailable handler. "mTimeSlice < 0" means Session object does not
+  // push encoded data to onDataAvailable, instead, it passive wait the client
+  // side pull encoded data by calling requestData API.
   const int32_t mTimeSlice;
   // Indicate this session's stop has been called.
   bool mStopIssued;
@@ -1084,6 +1158,8 @@ private:
   // Main thread only.
   bool mNeedSessionEndTask;
 };
+
+NS_IMPL_ISUPPORTS_INHERITED0(MediaRecorder::Session::PushBlobRunnable, Runnable)
 
 MediaRecorder::~MediaRecorder()
 {
@@ -1199,6 +1275,8 @@ MediaRecorder::Start(const Optional<int32_t>& aTimeSlice, ErrorResult& aResult)
   mSessions.AppendElement();
   mSessions.LastElement() = new Session(this, timeSlice);
   mSessions.LastElement()->Start();
+  mStartTime = TimeStamp::Now();
+  Telemetry::ScalarAdd(Telemetry::ScalarID::MEDIARECORDER_RECORDING_COUNT, 1);
 }
 
 void
@@ -1446,16 +1524,14 @@ MediaRecorder::IsTypeSupported(const nsAString& aMIMEType)
 }
 
 nsresult
-MediaRecorder::CreateAndDispatchBlobEvent(already_AddRefed<nsIDOMBlob>&& aBlob)
+MediaRecorder::CreateAndDispatchBlobEvent(Blob* aBlob)
 {
   MOZ_ASSERT(NS_IsMainThread(), "Not running on main thread");
 
   BlobEventInit init;
   init.mBubbles = false;
   init.mCancelable = false;
-
-  nsCOMPtr<nsIDOMBlob> blob = aBlob;
-  init.mData = static_cast<Blob*>(blob.get());
+  init.mData = aBlob;
 
   RefPtr<BlobEvent> event =
     BlobEvent::Constructor(this,
@@ -1574,6 +1650,12 @@ MediaRecorder::StopForSessionDestruction()
   mState = RecordingState::Inactive;
   MOZ_ASSERT(mSessions.Length() > 0);
   mSessions.LastElement()->Stop();
+  // This is a coarse calculation and does not reflect the duration of the
+  // final recording for reasons such as pauses. However it allows us an idea
+  // of how long people are running their recorders for.
+  TimeDuration timeDelta = TimeStamp::Now() - mStartTime;
+  Telemetry::Accumulate(Telemetry::MEDIA_RECORDER_RECORDING_DURATION,
+                        timeDelta.ToSeconds());
 }
 
 void

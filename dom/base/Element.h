@@ -39,6 +39,7 @@
 #include "mozilla/dom/WindowBinding.h"
 #include "mozilla/dom/ElementBinding.h"
 #include "mozilla/dom/Nullable.h"
+#include "mozilla/dom/PointerEventHandler.h"
 #include "mozilla/UniquePtr.h"
 #include "Units.h"
 #include "DOMIntersectionObserver.h"
@@ -72,6 +73,8 @@ namespace dom {
   class ElementOrCSSPseudoElement;
   class UnrestrictedDoubleOrKeyframeAnimationOptions;
   enum class CallerType : uint32_t;
+  typedef nsDataHashtable<nsRefPtrHashKey<DOMIntersectionObserver>, int32_t>
+    IntersectionObserverList;
 } // namespace dom
 } // namespace mozilla
 
@@ -372,7 +375,7 @@ public:
    * attribute on this element.
    */
   virtual UniquePtr<nsISMILAttr> GetAnimatedAttr(int32_t aNamespaceID,
-                                                 nsIAtom* aName)
+                                                 nsAtom* aName)
   {
     return nullptr;
   }
@@ -414,7 +417,7 @@ public:
    *    returns true here even though it stores nothing in the mapped
    *    attributes.
    */
-  NS_IMETHOD_(bool) IsAttributeMapped(const nsIAtom* aAttribute) const;
+  NS_IMETHOD_(bool) IsAttributeMapped(const nsAtom* aAttribute) const;
 
   /**
    * Get a hint that tells the style system what to do when
@@ -422,7 +425,7 @@ public:
    * in response to the change *other* than the result of what is
    * mapped into style data via any type of style rule.
    */
-  virtual nsChangeHint GetAttributeChangeHint(const nsIAtom* aAttribute,
+  virtual nsChangeHint GetAttributeChangeHint(const nsAtom* aAttribute,
                                               int32_t aModType) const;
 
   inline Directionality GetDirectionality() const {
@@ -689,7 +692,7 @@ public:
   GetExistingAttrNameFromQName(const nsAString& aStr) const;
 
   MOZ_ALWAYS_INLINE  // Avoid a crashy hook from Avast 10 Beta (Bug 1058131)
-  nsresult SetAttr(int32_t aNameSpaceID, nsIAtom* aName,
+  nsresult SetAttr(int32_t aNameSpaceID, nsAtom* aName,
                    const nsAString& aValue, bool aNotify)
   {
     return SetAttr(aNameSpaceID, aName, nullptr, aValue, aNotify);
@@ -713,8 +716,8 @@ public:
    * @param aOldValueSet [out] Indicates whether an old attribute value has been
    *   stored in aOldValue. The bool will be set to true if a value was stored.
    */
-  bool MaybeCheckSameAttrVal(int32_t aNamespaceID, nsIAtom* aName,
-                             nsIAtom* aPrefix,
+  bool MaybeCheckSameAttrVal(int32_t aNamespaceID, nsAtom* aName,
+                             nsAtom* aPrefix,
                              const nsAttrValueOrString& aValue,
                              bool aNotify, nsAttrValue& aOldValue,
                              uint8_t* aModType, bool* aHasListeners,
@@ -740,8 +743,8 @@ public:
    * @param aOldValueSet [out] Indicates whether an old attribute value has been
    *   stored in aOldValue. The bool will be set to true if a value was stored.
    */
-  bool OnlyNotifySameValueSet(int32_t aNamespaceID, nsIAtom* aName,
-                              nsIAtom* aPrefix,
+  bool OnlyNotifySameValueSet(int32_t aNamespaceID, nsAtom* aName,
+                              nsAtom* aPrefix,
                               const nsAttrValueOrString& aValue,
                               bool aNotify, nsAttrValue& aOldValue,
                               uint8_t* aModType, bool* aHasListeners,
@@ -752,31 +755,31 @@ public:
    * Assumes that we are not notifying and that the attribute hasn't been
    * set previously.
    */
-  nsresult SetSingleClassFromParser(nsIAtom* aSingleClassName);
+  nsresult SetSingleClassFromParser(nsAtom* aSingleClassName);
 
-  virtual nsresult SetAttr(int32_t aNameSpaceID, nsIAtom* aName, nsIAtom* aPrefix,
+  virtual nsresult SetAttr(int32_t aNameSpaceID, nsAtom* aName, nsAtom* aPrefix,
                            const nsAString& aValue, bool aNotify) override;
   // aParsedValue receives the old value of the attribute. That's useful if
   // either the input or output value of aParsedValue is StoresOwnData.
-  nsresult SetParsedAttr(int32_t aNameSpaceID, nsIAtom* aName, nsIAtom* aPrefix,
+  nsresult SetParsedAttr(int32_t aNameSpaceID, nsAtom* aName, nsAtom* aPrefix,
                          nsAttrValue& aParsedValue, bool aNotify);
   // GetAttr is not inlined on purpose, to keep down codesize from all
   // the inlined nsAttrValue bits for C++ callers.
-  bool GetAttr(int32_t aNameSpaceID, nsIAtom* aName,
+  bool GetAttr(int32_t aNameSpaceID, nsAtom* aName,
                nsAString& aResult) const;
-  inline bool HasAttr(int32_t aNameSpaceID, nsIAtom* aName) const;
+  inline bool HasAttr(int32_t aNameSpaceID, nsAtom* aName) const;
   // aCaseSensitive == eIgnoreCaase means ASCII case-insensitive matching.
-  inline bool AttrValueIs(int32_t aNameSpaceID, nsIAtom* aName,
+  inline bool AttrValueIs(int32_t aNameSpaceID, nsAtom* aName,
                           const nsAString& aValue,
                           nsCaseTreatment aCaseSensitive) const;
-  inline bool AttrValueIs(int32_t aNameSpaceID, nsIAtom* aName,
-                          nsIAtom* aValue,
+  inline bool AttrValueIs(int32_t aNameSpaceID, nsAtom* aName,
+                          nsAtom* aValue,
                           nsCaseTreatment aCaseSensitive) const;
   virtual int32_t FindAttrValueIn(int32_t aNameSpaceID,
-                                  nsIAtom* aName,
+                                  nsAtom* aName,
                                   AttrValuesArray* aValues,
                                   nsCaseTreatment aCaseSensitive) const override;
-  virtual nsresult UnsetAttr(int32_t aNameSpaceID, nsIAtom* aAttribute,
+  virtual nsresult UnsetAttr(int32_t aNameSpaceID, nsAtom* aAttribute,
                              bool aNotify) override;
   virtual const nsAttrName* GetAttrNameAt(uint32_t aIndex) const override;
   virtual BorrowedAttrInfo GetAttrInfoAt(uint32_t aIndex) const override;
@@ -811,7 +814,7 @@ public:
    * Attribute Mapping Helpers
    */
   struct MappedAttributeEntry {
-    nsIAtom** attribute;
+    nsAtom** attribute;
   };
 
   /**
@@ -822,24 +825,24 @@ public:
    */
   template<size_t N>
   static bool
-  FindAttributeDependence(const nsIAtom* aAttribute,
+  FindAttributeDependence(const nsAtom* aAttribute,
                           const MappedAttributeEntry* const (&aMaps)[N])
   {
     return FindAttributeDependence(aAttribute, aMaps, N);
   }
 
-  static nsIAtom*** HTMLSVGPropertiesToTraverseAndUnlink();
+  static nsAtom*** HTMLSVGPropertiesToTraverseAndUnlink();
 
 private:
   void DescribeAttribute(uint32_t index, nsAString& aOutDescription) const;
 
   static bool
-  FindAttributeDependence(const nsIAtom* aAttribute,
+  FindAttributeDependence(const nsAtom* aAttribute,
                           const MappedAttributeEntry* const aMaps[],
                           uint32_t aMapCount);
 
 protected:
-  inline bool GetAttr(int32_t aNameSpaceID, nsIAtom* aName,
+  inline bool GetAttr(int32_t aNameSpaceID, nsAtom* aName,
                       DOMString& aResult) const
   {
     NS_ASSERTION(nullptr != aName, "must have attribute name");
@@ -997,7 +1000,7 @@ public:
   void SetPointerCapture(int32_t aPointerId, ErrorResult& aError)
   {
     bool activeState = false;
-    if (!nsIPresShell::GetPointerInfo(aPointerId, activeState)) {
+    if (!PointerEventHandler::GetPointerInfo(aPointerId, activeState)) {
       aError.Throw(NS_ERROR_DOM_INVALID_POINTER_ERR);
       return;
     }
@@ -1005,26 +1008,32 @@ public:
       aError.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
       return;
     }
+    if (OwnerDoc()->GetPointerLockElement()) {
+      // Throw an exception 'InvalidStateError' while the page has a locked
+      // element.
+      aError.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
+      return;
+    }
     if (!activeState) {
       return;
     }
-    nsIPresShell::SetPointerCapturingContent(aPointerId, this);
+    PointerEventHandler::SetPointerCaptureById(aPointerId, this);
   }
   void ReleasePointerCapture(int32_t aPointerId, ErrorResult& aError)
   {
     bool activeState = false;
-    if (!nsIPresShell::GetPointerInfo(aPointerId, activeState)) {
+    if (!PointerEventHandler::GetPointerInfo(aPointerId, activeState)) {
       aError.Throw(NS_ERROR_DOM_INVALID_POINTER_ERR);
       return;
     }
     if (HasPointerCapture(aPointerId)) {
-      nsIPresShell::ReleasePointerCapturingContent(aPointerId);
+      PointerEventHandler::ReleasePointerCaptureById(aPointerId);
     }
   }
   bool HasPointerCapture(long aPointerId)
   {
-    nsIPresShell::PointerCaptureInfo* pointerCaptureInfo =
-      nsIPresShell::GetPointerCaptureInfo(aPointerId);
+    PointerCaptureInfo* pointerCaptureInfo =
+      PointerEventHandler::GetPointerCaptureInfo(aPointerId);
     if (pointerCaptureInfo && pointerCaptureInfo->mPendingContent == this) {
       return true;
     }
@@ -1079,9 +1088,10 @@ public:
     return slots ? slots->mShadowRoot.get() : nullptr;
   }
 
-  void ScrollIntoView();
-  void ScrollIntoView(bool aTop);
+private:
   void ScrollIntoView(const ScrollIntoViewOptions &aOptions);
+public:
+  void ScrollIntoView(const BooleanOrScrollIntoViewOptions& aObject);
   void Scroll(double aXScroll, double aYScroll);
   void Scroll(const ScrollToOptions& aOptions);
   void ScrollTo(double aXScroll, double aYScroll);
@@ -1189,7 +1199,7 @@ public:
    * @param aValue the JS to attach
    * @param aDefer indicates if deferred execution is allowed
    */
-  nsresult SetEventHandler(nsIAtom* aEventName,
+  nsresult SetEventHandler(nsAtom* aEventName,
                            const nsAString& aValue,
                            bool aDefer = true);
 
@@ -1242,12 +1252,12 @@ public:
   // Work around silly C++ name hiding stuff
   nsIFrame* GetPrimaryFrame() const { return nsIContent::GetPrimaryFrame(); }
 
-  const nsAttrValue* GetParsedAttr(nsIAtom* aAttr) const
+  const nsAttrValue* GetParsedAttr(nsAtom* aAttr) const
   {
     return mAttrsAndChildren.GetAttr(aAttr);
   }
 
-  const nsAttrValue* GetParsedAttr(nsIAtom* aAttr, int32_t aNameSpaceID) const
+  const nsAttrValue* GetParsedAttr(nsAtom* aAttr, int32_t aNameSpaceID) const
   {
     return mAttrsAndChildren.GetAttr(aAttr, aNameSpaceID);
   }
@@ -1276,7 +1286,7 @@ public:
    * is, this should only be called from methods that only care about attrs
    * that effectively live in mAttrsAndChildren.
    */
-  virtual BorrowedAttrInfo GetAttrInfo(int32_t aNamespaceID, nsIAtom* aName) const;
+  virtual BorrowedAttrInfo GetAttrInfo(int32_t aNamespaceID, nsAtom* aName) const;
 
   /**
    * Called when we have been adopted, and the information of the
@@ -1326,7 +1336,7 @@ public:
    * @param aAttr    name of attribute.
    * @param aValue   Boolean value of attribute.
    */
-  bool GetBoolAttr(nsIAtom* aAttr) const
+  bool GetBoolAttr(nsAtom* aAttr) const
   {
     return HasAttr(kNameSpaceID_None, aAttr);
   }
@@ -1339,7 +1349,7 @@ public:
    * @param aAttr    name of attribute.
    * @param aValue   Boolean value of attribute.
    */
-  nsresult SetBoolAttr(nsIAtom* aAttr, bool aValue);
+  nsresult SetBoolAttr(nsAtom* aAttr, bool aValue);
 
   /**
    * Helper method for NS_IMPL_ENUM_ATTR_DEFAULT_VALUE.
@@ -1350,7 +1360,7 @@ public:
    * @param aDefault  the default value if the attribute is missing or invalid.
    * @param aResult   string corresponding to the value [out].
    */
-  void GetEnumAttr(nsIAtom* aAttr,
+  void GetEnumAttr(nsAtom* aAttr,
                    const char* aDefault,
                    nsAString& aResult) const;
 
@@ -1368,7 +1378,7 @@ public:
    * @param aDefaultInvalid  the default value if the attribute is invalid.
    * @param aResult          string corresponding to the value [out].
    */
-  void GetEnumAttr(nsIAtom* aAttr,
+  void GetEnumAttr(nsAtom* aAttr,
                    const char* aDefaultMissing,
                    const char* aDefaultInvalid,
                    nsAString& aResult) const;
@@ -1376,7 +1386,7 @@ public:
   /**
    * Unset an attribute.
    */
-  void UnsetAttr(nsIAtom* aAttr, ErrorResult& aError)
+  void UnsetAttr(nsAtom* aAttr, ErrorResult& aError)
   {
     aError = UnsetAttr(kNameSpaceID_None, aAttr, true);
   }
@@ -1384,7 +1394,7 @@ public:
   /**
    * Set an attribute in the simplest way possible.
    */
-  void SetAttr(nsIAtom* aAttr, const nsAString& aValue, ErrorResult& aError)
+  void SetAttr(nsAtom* aAttr, const nsAString& aValue, ErrorResult& aError)
   {
     aError = SetAttr(kNameSpaceID_None, aAttr, aValue, true);
   }
@@ -1394,7 +1404,7 @@ public:
    * attribute (e.g. a CORS attribute).  If DOMStringIsNull(aValue),
    * this will actually remove the content attribute.
    */
-  void SetOrRemoveNullableStringAttr(nsIAtom* aName, const nsAString& aValue,
+  void SetOrRemoveNullableStringAttr(nsAtom* aName, const nsAString& aValue,
                                      ErrorResult& aError);
 
   /**
@@ -1428,6 +1438,7 @@ public:
 
   void RegisterIntersectionObserver(DOMIntersectionObserver* aObserver);
   void UnregisterIntersectionObserver(DOMIntersectionObserver* aObserver);
+  void UnlinkIntersectionObservers();
   bool UpdateIntersectionObservation(DOMIntersectionObserver* aObserver, int32_t threshold);
 
 protected:
@@ -1475,8 +1486,8 @@ protected:
    * @param aComposedDocument The current composed document of the element.
    */
   nsresult SetAttrAndNotify(int32_t aNamespaceID,
-                            nsIAtom* aName,
-                            nsIAtom* aPrefix,
+                            nsAtom* aName,
+                            nsAtom* aPrefix,
                             const nsAttrValue* aOldValue,
                             nsAttrValue& aParsedValue,
                             uint8_t aModType,
@@ -1509,7 +1520,7 @@ protected:
    * @return true if the parsing was successful, false otherwise
    */
   virtual bool ParseAttribute(int32_t aNamespaceID,
-                                nsIAtom* aAttribute,
+                                nsAtom* aAttribute,
                                 const nsAString& aValue,
                                 nsAttrValue& aResult);
 
@@ -1531,7 +1542,7 @@ protected:
    * @param [out] aRetval the nsresult status of the operation, if any.
    * @return true if the setting was attempted, false otherwise.
    */
-  virtual bool SetAndSwapMappedAttribute(nsIAtom* aName,
+  virtual bool SetAndSwapMappedAttribute(nsAtom* aName,
                                          nsAttrValue& aValue,
                                          bool* aValueWasSet,
                                          nsresult* aRetval);
@@ -1550,7 +1561,7 @@ protected:
    *        will be null.
    * @param aNotify Whether we plan to notify document observers.
    */
-  virtual nsresult BeforeSetAttr(int32_t aNamespaceID, nsIAtom* aName,
+  virtual nsresult BeforeSetAttr(int32_t aNamespaceID, nsAtom* aName,
                                  const nsAttrValueOrString* aValue,
                                  bool aNotify);
 
@@ -1572,7 +1583,7 @@ protected:
    */
   // Note that this is inlined so that when subclasses call it it gets
   // inlined.  Those calls don't go through a vtable.
-  virtual nsresult AfterSetAttr(int32_t aNamespaceID, nsIAtom* aName,
+  virtual nsresult AfterSetAttr(int32_t aNamespaceID, nsAtom* aName,
                                 const nsAttrValue* aValue,
                                 const nsAttrValue* aOldValue, bool aNotify)
   {
@@ -1594,7 +1605,7 @@ protected:
    * @param aName the localname of the attribute being set
    * @param aValue the new id value. Will be null if the id is being unset.
    */
-  void PreIdMaybeChange(int32_t aNamespaceID, nsIAtom* aName,
+  void PreIdMaybeChange(int32_t aNamespaceID, nsAtom* aName,
                         const nsAttrValueOrString* aValue);
 
   /**
@@ -1612,7 +1623,7 @@ protected:
    * @param aName the localname of the attribute being set
    * @param aValue the new id value. Will be null if the id is being unset.
    */
-  void PostIdMaybeChange(int32_t aNamespaceID, nsIAtom* aName,
+  void PostIdMaybeChange(int32_t aNamespaceID, nsAtom* aName,
                          const nsAttrValue* aValue);
 
   /**
@@ -1630,7 +1641,7 @@ protected:
    */
   // Note that this is inlined so that when subclasses call it it gets
   // inlined.  Those calls don't go through a vtable.
-  virtual nsresult OnAttrSetButNotChanged(int32_t aNamespaceID, nsIAtom* aName,
+  virtual nsresult OnAttrSetButNotChanged(int32_t aNamespaceID, nsAtom* aName,
                                           const nsAttrValueOrString& aValue,
                                           bool aNotify)
   {
@@ -1642,7 +1653,7 @@ protected:
    * needed for attachment of attribute-defined handlers
    */
   virtual EventListenerManager*
-    GetEventListenerManagerForAttr(nsIAtom* aAttrName, bool* aDefer);
+    GetEventListenerManagerForAttr(nsAtom* aAttrName, bool* aDefer);
 
   /**
    * Internal hook for converting an attribute name-string to nsAttrName in
@@ -1669,7 +1680,7 @@ protected:
   /**
    * Add/remove this element to the documents id cache
    */
-  void AddToIdTable(nsIAtom* aId);
+  void AddToIdTable(nsAtom* aId);
   void RemoveFromIdTable();
 
   /**
@@ -1710,11 +1721,8 @@ protected:
    */
   virtual void GetLinkTarget(nsAString& aTarget);
 
-  nsDOMTokenList* GetTokenList(nsIAtom* aAtom,
+  nsDOMTokenList* GetTokenList(nsAtom* aAtom,
                                const DOMTokenListSupportedTokenArray aSupportedTokens = nullptr);
-
-  nsDataHashtable<nsRefPtrHashKey<DOMIntersectionObserver>, int32_t>*
-    RegisteredIntersectionObservers();
 
 private:
   /**
@@ -1780,7 +1788,7 @@ protected:
 NS_DEFINE_STATIC_IID_ACCESSOR(Element, NS_ELEMENT_IID)
 
 inline bool
-Element::HasAttr(int32_t aNameSpaceID, nsIAtom* aName) const
+Element::HasAttr(int32_t aNameSpaceID, nsAtom* aName) const
 {
   NS_ASSERTION(nullptr != aName, "must have attribute name");
   NS_ASSERTION(aNameSpaceID != kNameSpaceID_Unknown,
@@ -1791,7 +1799,7 @@ Element::HasAttr(int32_t aNameSpaceID, nsIAtom* aName) const
 
 inline bool
 Element::AttrValueIs(int32_t aNameSpaceID,
-                     nsIAtom* aName,
+                     nsAtom* aName,
                      const nsAString& aValue,
                      nsCaseTreatment aCaseSensitive) const
 {
@@ -1804,8 +1812,8 @@ Element::AttrValueIs(int32_t aNameSpaceID,
 
 inline bool
 Element::AttrValueIs(int32_t aNameSpaceID,
-                     nsIAtom* aName,
-                     nsIAtom* aValue,
+                     nsAtom* aName,
+                     nsAtom* aValue,
                      nsCaseTreatment aCaseSensitive) const
 {
   NS_ASSERTION(aName, "Must have attr name");

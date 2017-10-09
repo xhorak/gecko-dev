@@ -2115,7 +2115,7 @@ static ThreadInfo*
 FindLiveThreadInfo(PSLockRef aLock, int* aIndexOut = nullptr)
 {
   ThreadInfo* ret = nullptr;
-  Thread::tid_t id = Thread::GetCurrentId();
+  int id = Thread::GetCurrentId();
   const CorePS::ThreadVector& liveThreads = CorePS::LiveThreads(aLock);
   for (uint32_t i = 0; i < liveThreads.size(); i++) {
     ThreadInfo* info = liveThreads.at(i);
@@ -2729,7 +2729,7 @@ locked_profiler_start(PSLockRef aLock, int aEntries, double aInterval,
   ActivePS::Create(aLock, entries, interval, aFeatures, aFilters, aFilterCount);
 
   // Set up profiling for each registered thread, if appropriate.
-  Thread::tid_t tid = Thread::GetCurrentId();
+  int tid = Thread::GetCurrentId();
   const CorePS::ThreadVector& liveThreads = CorePS::LiveThreads(aLock);
   for (uint32_t i = 0; i < liveThreads.size(); i++) {
     ThreadInfo* info = liveThreads.at(i);
@@ -2878,7 +2878,7 @@ locked_profiler_stop(PSLockRef aLock)
 #endif
 
   // Stop sampling live threads.
-  Thread::tid_t tid = Thread::GetCurrentId();
+  int tid = Thread::GetCurrentId();
   CorePS::ThreadVector& liveThreads = CorePS::LiveThreads(aLock);
   for (uint32_t i = 0; i < liveThreads.size(); i++) {
     ThreadInfo* info = liveThreads.at(i);
@@ -3163,7 +3163,7 @@ profiler_get_backtrace()
     return nullptr;
   }
 
-  Thread::tid_t tid = Thread::GetCurrentId();
+  int tid = Thread::GetCurrentId();
 
   TimeStamp now = TimeStamp::Now();
 
@@ -3252,7 +3252,7 @@ profiler_tracing(const char* aCategory, const char* aMarkerName,
 
 void
 profiler_tracing(const char* aCategory, const char* aMarkerName,
-                 UniqueProfilerBacktrace aCause, TracingKind aKind)
+                 TracingKind aKind, UniqueProfilerBacktrace aCause)
 {
   MOZ_RELEASE_ASSERT(CorePS::Exists());
 

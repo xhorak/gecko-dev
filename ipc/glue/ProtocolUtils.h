@@ -626,18 +626,22 @@ public:
 
     Endpoint(Endpoint&& aOther)
       : mValid(aOther.mValid)
-      , mMode(aOther.mMode)
       , mTransport(aOther.mTransport)
       , mMyPid(aOther.mMyPid)
       , mOtherPid(aOther.mOtherPid)
     {
+        if (aOther.mValid) {
+            mMode = aOther.mMode;
+        }
         aOther.mValid = false;
     }
 
     Endpoint& operator=(Endpoint&& aOther)
     {
         mValid = aOther.mValid;
-        mMode = aOther.mMode;
+        if (aOther.mValid) {
+            mMode = aOther.mMode;
+        }
         mTransport = aOther.mTransport;
         mMyPid = aOther.mMyPid;
         mOtherPid = aOther.mOtherPid;
@@ -731,8 +735,6 @@ CreateEndpoints(const PrivateIPDLInterface& aPrivate,
 void
 TableToArray(const nsTHashtable<nsPtrHashKey<void>>& aTable,
              nsTArray<void*>& aArray);
-
-const char* StringFromIPCMessageType(uint32_t aMessageType);
 
 } // namespace ipc
 

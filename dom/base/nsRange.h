@@ -68,6 +68,9 @@ public:
                               nsINode* aEndContainer,
                               uint32_t aEndOffset,
                               nsRange** aRange);
+  static nsresult CreateRange(const RawRangeBoundary& aStart,
+                              const RawRangeBoundary& aEnd,
+                              nsRange** aRange);
 
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_AMBIGUOUS(nsRange, nsIDOMRange)
@@ -194,6 +197,8 @@ public:
    */
   nsresult SetStartAndEnd(nsINode* aStartContainer, uint32_t aStartOffset,
                           nsINode* aEndContainer, uint32_t aEndOffset);
+  nsresult SetStartAndEnd(const RawRangeBoundary& aStart,
+                          const RawRangeBoundary& aEnd);
 
   /**
    * Adds all nodes between |aStartContent| and |aEndContent| to the range.
@@ -421,6 +426,11 @@ public:
    * @param aOutRanges the resulting set of ranges
    */
   void ExcludeNonSelectableNodes(nsTArray<RefPtr<nsRange>>* aOutRanges);
+
+  /**
+   * Notify the selection listeners after a range has been modified.
+   */
+  void NotifySelectionListenersAfterRangeSet();
 
   typedef nsTHashtable<nsPtrHashKey<nsRange> > RangeHashTable;
 protected:

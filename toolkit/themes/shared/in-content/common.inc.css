@@ -21,7 +21,7 @@
   --in-content-border-highlight: #0a84ff;
   --in-content-border-focus: #0a84ff;
   --in-content-border-color: #d7d7db;
-  --in-content-category-border-focus: 1px dotted #0a84ff;
+  --in-content-category-outline-focus: 1px dotted #0a84ff;
   --in-content-category-text: rgba(12,12,13);
   --in-content-category-text-active: #0c0c0d;
   --in-content-category-text-selected: #0a84ff;
@@ -691,8 +691,7 @@ xul|*.radio-label-box {
 }
 
 *|*#categories[keyboard-navigation="true"]:-moz-focusring > *|*.category[current] {
-  border: var(--in-content-category-border-focus);
-  border-inline-start: none;
+  outline: var(--in-content-category-outline-focus);
 }
 
 *|*.category-name {
@@ -720,21 +719,13 @@ xul|*.radio-label-box {
     width: 118px;
   }
 
-  .category-icon ~ .category-name {
+  .category-icon + .category-name {
     display: none;
   }
 
   .category {
     padding-inline-start: 13px; /* make category icons align center */
-    margin-inline-end: 35px;
-  }
-
-  .help-button {
-    font-size: 0 !important;
-    margin-inline-start: 41px !important; /* make the question mark icon align center */
-    background-position: 10px !important;
-    padding-inline-start: 0px !important;
-    width: 36px !important;
+    margin-inline-end: 33px;
   }
 
   .main-content {
@@ -897,14 +888,6 @@ xul|treecol:not([hideheader="true"]) > xul|*.treecol-sortdirection[sortDirection
 
 xul|treecol:not([hideheader="true"]) > xul|*.treecol-sortdirection[sortDirection="ascending"] {
   transform: scaleY(-1);
-}
-
-xul|treecol > xul|label.treecol-text {
-  font-size: 1rem;
-}
-
-xul|treechildren {
-  font-size: 1rem !important;
 }
 
 /* This is the only way to increase the height of a tree row unfortunately */

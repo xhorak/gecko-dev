@@ -342,6 +342,10 @@ pref("browser.urlbar.oneOffSearches", true);
 // human readable (percent-decoded) URL on the clipboard.
 pref("browser.urlbar.decodeURLsOnCopy", false);
 
+// Whether or not to move tabs into the active window when using the "Switch to
+// Tab" feature of the awesomebar.
+pref("browser.urlbar.switchTabs.adoptIntoActiveWindow", false);
+
 pref("browser.altClickSave", false);
 
 // Enable logging downloads operations to the Console.
@@ -478,6 +482,9 @@ pref("browser.tabs.selectOwnerOnClose", true);
 pref("browser.tabs.showAudioPlayingIcon", true);
 // This should match Chromium's audio indicator delay.
 pref("browser.tabs.delayHidingAudioPlayingIconMS", 3000);
+
+// The minimum tab width in pixels
+pref("browser.tabs.tabMinWidth", 50);
 
 pref("browser.ctrlTab.previews", false);
 
@@ -1262,6 +1269,9 @@ pref("browser.newtabpage.directory.source", "https://tiles.services.mozilla.com/
 pref("browser.newtabpage.activity-stream.enabled", true);
 pref("browser.newtabpage.activity-stream.prerender", true);
 pref("browser.newtabpage.activity-stream.aboutHome.enabled", true);
+#ifndef RELEASE_OR_BETA
+pref("browser.newtabpage.activity-stream.debug", false);
+#endif
 
 pref("browser.library.activity-stream.enabled", true);
 
@@ -1625,10 +1635,7 @@ pref("browser.esedbreader.loglevel", "Error");
 
 pref("browser.laterrun.enabled", false);
 
-// Disable prelaunch in the same way activity-stream is enabled addressing
-// bug 1381804 memory usage until bug 1376895 is fixed.
-// Because of frequent crashes on Beta, it is turned off on all channels, see: bug 1363601.
-pref("dom.ipc.processPrelaunch.enabled", false);
+pref("dom.ipc.processPrelaunch.enabled", true);
 
 pref("browser.migrate.automigrate.enabled", false);
 // 4 here means the suggestion notification will be automatically

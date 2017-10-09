@@ -1724,7 +1724,7 @@ nsDisplayImage::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuilde
   const LayoutDeviceRect destRect(
     LayoutDeviceIntRect::FromAppUnits(GetDestRect(), factor));
   const LayerRect dest = ViewAs<LayerPixel>(destRect, PixelCastJustification::WebRenderHasUnitResolution);
-  return aManager->PushImage(this, container, aBuilder, aResources, aSc, dest);
+  return aManager->CommandBuilder().PushImage(this, container, aBuilder, aResources, aSc, dest);
 }
 
 DrawResult
@@ -2139,7 +2139,7 @@ nsImageFrame::GetCursor(const nsPoint& aPoint,
 
 nsresult
 nsImageFrame::AttributeChanged(int32_t aNameSpaceID,
-                               nsIAtom* aAttribute,
+                               nsAtom* aAttribute,
                                int32_t aModType)
 {
   nsresult rv = nsAtomicContainerFrame::AttributeChanged(aNameSpaceID,

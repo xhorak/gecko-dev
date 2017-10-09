@@ -202,14 +202,12 @@ protected:
 class DisplayListBuilder {
 public:
   explicit DisplayListBuilder(wr::PipelineId aId,
-                              const wr::LayoutSize& aContentSize);
+                              const wr::LayoutSize& aContentSize,
+                              size_t aCapacity = 0);
   DisplayListBuilder(DisplayListBuilder&&) = default;
 
   ~DisplayListBuilder();
 
-  void Begin(const mozilla::LayerIntSize& aSize);
-
-  void End();
   void Finalize(wr::LayoutSize& aOutContentSize,
                 wr::BuiltDisplayList& aOutDisplayList);
 
@@ -225,7 +223,7 @@ public:
   void PopStackingContext();
 
   wr::WrClipId DefineClip(const wr::LayoutRect& aClipRect,
-                          const nsTArray<wr::WrComplexClipRegion>* aComplex = nullptr,
+                          const nsTArray<wr::ComplexClipRegion>* aComplex = nullptr,
                           const wr::WrImageMask* aMask = nullptr);
   void PushClip(const wr::WrClipId& aClipId, bool aMask = false);
   void PopClip(bool aMask = false);
@@ -237,8 +235,6 @@ public:
                                    const wr::StickySideConstraint* aLeft);
   void PushStickyFrame(const wr::WrStickyId& aStickyId);
   void PopStickyFrame();
-
-  void PushBuiltDisplayList(wr::BuiltDisplayList &dl);
 
   bool IsScrollLayerDefined(layers::FrameMetrics::ViewID aScrollId) const;
   void DefineScrollLayer(const layers::FrameMetrics::ViewID& aScrollId,
@@ -360,7 +356,7 @@ public:
   void PushText(const wr::LayoutRect& aBounds,
                 const wr::LayoutRect& aClip,
                 bool aIsBackfaceVisible,
-                const gfx::Color& aColor,
+                const wr::ColorF& aColor,
                 wr::FontInstanceKey aFontKey,
                 Range<const wr::GlyphInstance> aGlyphBuffer,
                 const wr::GlyphOptions* aGlyphOptions = nullptr);
@@ -369,12 +365,12 @@ public:
                 bool aIsBackfaceVisible,
                 const wr::Line& aLine);
 
-  void PushTextShadow(const wr::LayoutRect& aBounds,
+  void PushShadow(const wr::LayoutRect& aBounds,
                       const wr::LayoutRect& aClip,
                       bool aIsBackfaceVisible,
-                      const wr::TextShadow& aShadow);
+                      const wr::Shadow& aShadow);
 
-  void PopTextShadow();
+  void PopShadow();
 
 
 

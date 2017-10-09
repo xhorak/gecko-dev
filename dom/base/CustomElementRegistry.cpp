@@ -6,6 +6,7 @@
 
 #include "mozilla/dom/CustomElementRegistry.h"
 
+#include "mozilla/CycleCollectedJSContext.h"
 #include "mozilla/dom/CustomElementRegistryBinding.h"
 #include "mozilla/dom/HTMLElementBinding.h"
 #include "mozilla/dom/WebComponentsBinding.h"
@@ -48,7 +49,7 @@ CustomElementCallback::Call()
             extType.IsEmpty() ? nullptr : &extType);
 
         nsContentUtils::EnqueueLifecycleCallback(
-          nsIDocument::eConnected, mThisObject, nullptr, definition);
+          nsIDocument::eConnected, mThisObject, nullptr, nullptr, definition);
       }
 
       static_cast<LifecycleCreatedCallback *>(mCallback.get())->Call(mThisObject, rv);
@@ -60,6 +61,10 @@ CustomElementCallback::Call()
       break;
     case nsIDocument::eDisconnected:
       static_cast<LifecycleDisconnectedCallback *>(mCallback.get())->Call(mThisObject, rv);
+      break;
+    case nsIDocument::eAdopted:
+      static_cast<LifecycleAdoptedCallback *>(mCallback.get())->Call(mThisObject,
+        mAdoptedCallbackArgs.mOldDocument, mAdoptedCallbackArgs.mNewDocument, rv);
       break;
     case nsIDocument::eAttributeChanged:
       static_cast<LifecycleAttributeChangedCallback *>(mCallback.get())->Call(mThisObject,
@@ -122,12 +127,12 @@ CustomElementConstructor::Construct(const char* aExecutionReason,
 //-----------------------------------------------------
 // CustomElementData
 
-CustomElementData::CustomElementData(nsIAtom* aType)
+CustomElementData::CustomElementData(nsAtom* aType)
   : CustomElementData(aType, CustomElementData::State::eUndefined)
 {
 }
 
-CustomElementData::CustomElementData(nsIAtom* aType, State aState)
+CustomElementData::CustomElementData(nsAtom* aType, State aState)
   : mType(aType)
   , mElementIsBeingCreated(false)
   , mCreatedCallbackInvoked(true)
@@ -225,8 +230,8 @@ CustomElementDefinition*
 CustomElementRegistry::LookupCustomElementDefinition(const nsAString& aLocalName,
                                                      const nsAString* aIs) const
 {
-  nsCOMPtr<nsIAtom> localNameAtom = NS_Atomize(aLocalName);
-  nsCOMPtr<nsIAtom> typeAtom = aIs ? NS_Atomize(*aIs) : localNameAtom;
+  RefPtr<nsAtom> localNameAtom = NS_Atomize(aLocalName);
+  RefPtr<nsAtom> typeAtom = aIs ? NS_Atomize(*aIs) : localNameAtom;
 
   CustomElementDefinition* data = mCustomDefinitions.GetWeak(typeAtom);
   if (data && data->mLocalName == localNameAtom) {
@@ -254,14 +259,14 @@ CustomElementRegistry::LookupCustomElementDefinition(JSContext* aCx,
 }
 
 void
-CustomElementRegistry::RegisterUnresolvedElement(Element* aElement, nsIAtom* aTypeName)
+CustomElementRegistry::RegisterUnresolvedElement(Element* aElement, nsAtom* aTypeName)
 {
   mozilla::dom::NodeInfo* info = aElement->NodeInfo();
 
   // Candidate may be a custom element through extension,
   // in which case the custom element type name will not
   // match the element tag name. e.g. <button is="x-button">.
-  nsCOMPtr<nsIAtom> typeName = aTypeName;
+  RefPtr<nsAtom> typeName = aTypeName;
   if (!typeName) {
     typeName = info->NameAtom();
   }
@@ -280,8 +285,8 @@ void
 CustomElementRegistry::SetupCustomElement(Element* aElement,
                                           const nsAString* aTypeExtension)
 {
-  nsCOMPtr<nsIAtom> tagAtom = aElement->NodeInfo()->NameAtom();
-  nsCOMPtr<nsIAtom> typeAtom = aTypeExtension ?
+  RefPtr<nsAtom> tagAtom = aElement->NodeInfo()->NameAtom();
+  RefPtr<nsAtom> typeAtom = aTypeExtension ?
     NS_Atomize(*aTypeExtension) : tagAtom;
 
   if (aTypeExtension && !aElement->HasAttr(kNameSpaceID_None, nsGkAtoms::is)) {
@@ -323,7 +328,9 @@ CustomElementRegistry::SetupCustomElement(Element* aElement,
 /* static */ UniquePtr<CustomElementCallback>
 CustomElementRegistry::CreateCustomElementCallback(
   nsIDocument::ElementCallbackType aType, Element* aCustomElement,
-  LifecycleCallbackArgs* aArgs, CustomElementDefinition* aDefinition)
+  LifecycleCallbackArgs* aArgs,
+  LifecycleAdoptedCallbackArgs* aAdoptedCallbackArgs,
+  CustomElementDefinition* aDefinition)
 {
   MOZ_ASSERT(aDefinition, "CustomElementDefinition should not be null");
 
@@ -348,6 +355,12 @@ CustomElementRegistry::CreateCustomElementCallback(
     case nsIDocument::eDisconnected:
       if (aDefinition->mCallbacks->mDisconnectedCallback.WasPassed()) {
         func = aDefinition->mCallbacks->mDisconnectedCallback.Value();
+      }
+      break;
+
+    case nsIDocument::eAdopted:
+      if (aDefinition->mCallbacks->mAdoptedCallback.WasPassed()) {
+        func = aDefinition->mCallbacks->mAdoptedCallback.Value();
       }
       break;
 
@@ -379,6 +392,9 @@ CustomElementRegistry::CreateCustomElementCallback(
     callback->SetArgs(*aArgs);
   }
 
+  if (aAdoptedCallbackArgs) {
+    callback->SetAdoptedCallbackArgs(*aAdoptedCallbackArgs);
+  }
   return Move(callback);
 }
 
@@ -388,7 +404,7 @@ CustomElementRegistry::SyncInvokeReactions(nsIDocument::ElementCallbackType aTyp
                                            CustomElementDefinition* aDefinition)
 {
   auto callback = CreateCustomElementCallback(aType, aCustomElement, nullptr,
-                                              aDefinition);
+                                              nullptr, aDefinition);
   if (!callback) {
     return;
   }
@@ -407,6 +423,7 @@ CustomElementRegistry::SyncInvokeReactions(nsIDocument::ElementCallbackType aTyp
 CustomElementRegistry::EnqueueLifecycleCallback(nsIDocument::ElementCallbackType aType,
                                                 Element* aCustomElement,
                                                 LifecycleCallbackArgs* aArgs,
+                                                LifecycleAdoptedCallbackArgs* aAdoptedCallbackArgs,
                                                 CustomElementDefinition* aDefinition)
 {
   CustomElementDefinition* definition = aDefinition;
@@ -419,7 +436,8 @@ CustomElementRegistry::EnqueueLifecycleCallback(nsIDocument::ElementCallbackType
   }
 
   auto callback =
-    CreateCustomElementCallback(aType, aCustomElement, aArgs, definition);
+    CreateCustomElementCallback(aType, aCustomElement, aArgs,
+                                aAdoptedCallbackArgs, definition);
   if (!callback) {
     return;
   }
@@ -430,7 +448,7 @@ CustomElementRegistry::EnqueueLifecycleCallback(nsIDocument::ElementCallbackType
   }
 
   if (aType == nsIDocument::eAttributeChanged) {
-    nsCOMPtr<nsIAtom> attrName = NS_Atomize(aArgs->name);
+    RefPtr<nsAtom> attrName = NS_Atomize(aArgs->name);
     if (definition->mObservedAttributes.IsEmpty() ||
         !definition->mObservedAttributes.Contains(attrName)) {
       return;
@@ -444,7 +462,7 @@ CustomElementRegistry::EnqueueLifecycleCallback(nsIDocument::ElementCallbackType
 }
 
 void
-CustomElementRegistry::GetCustomPrototype(nsIAtom* aAtom,
+CustomElementRegistry::GetCustomPrototype(nsAtom* aAtom,
                                           JS::MutableHandle<JSObject*> aPrototype)
 {
   mozilla::dom::CustomElementDefinition* definition =
@@ -457,7 +475,7 @@ CustomElementRegistry::GetCustomPrototype(nsIAtom* aAtom,
 }
 
 void
-CustomElementRegistry::UpgradeCandidates(nsIAtom* aKey,
+CustomElementRegistry::UpgradeCandidates(nsAtom* aKey,
                                          CustomElementDefinition* aDefinition,
                                          ErrorResult& aRv)
 {
@@ -576,7 +594,7 @@ CustomElementRegistry::Define(const nsAString& aName,
    * 2. If name is not a valid custom element name, then throw a "SyntaxError"
    *    DOMException and abort these steps.
    */
-  nsCOMPtr<nsIAtom> nameAtom(NS_Atomize(aName));
+  RefPtr<nsAtom> nameAtom(NS_Atomize(aName));
   if (!nsContentUtils::IsCustomElementName(nameAtom)) {
     aRv.Throw(NS_ERROR_DOM_SYNTAX_ERR);
     return;
@@ -618,7 +636,7 @@ CustomElementRegistry::Define(const nsAString& aName,
    */
   nsAutoString localName(aName);
   if (aOptions.mExtends.WasPassed()) {
-    nsCOMPtr<nsIAtom> extendsAtom(NS_Atomize(aOptions.mExtends.Value()));
+    RefPtr<nsAtom> extendsAtom(NS_Atomize(aOptions.mExtends.Value()));
     if (nsContentUtils::IsCustomElementName(extendsAtom)) {
       aRv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
       return;
@@ -647,7 +665,7 @@ CustomElementRegistry::Define(const nsAString& aName,
 
   JS::Rooted<JSObject*> constructorPrototype(cx);
   nsAutoPtr<LifecycleCallbacks> callbacksHolder(new LifecycleCallbacks());
-  nsCOMArray<nsIAtom> observedAttributes;
+  nsTArray<RefPtr<nsAtom>> observedAttributes;
   { // Set mIsCustomDefinitionRunning.
     /**
      * 9. Set this CustomElementRegistry's element definition is running flag.
@@ -778,7 +796,7 @@ CustomElementRegistry::Define(const nsAString& aName,
    *     lifecycleCallbacks.
    */
   // Associate the definition with the custom element.
-  nsCOMPtr<nsIAtom> localNameAtom(NS_Atomize(localName));
+  RefPtr<nsAtom> localNameAtom(NS_Atomize(localName));
   LifecycleCallbacks* callbacks = callbacksHolder.forget();
 
   /**
@@ -829,7 +847,7 @@ void
 CustomElementRegistry::Get(JSContext* aCx, const nsAString& aName,
                            JS::MutableHandle<JS::Value> aRetVal)
 {
-  nsCOMPtr<nsIAtom> nameAtom(NS_Atomize(aName));
+  RefPtr<nsAtom> nameAtom(NS_Atomize(aName));
   CustomElementDefinition* data = mCustomDefinitions.GetWeak(nameAtom);
 
   if (!data) {
@@ -850,7 +868,7 @@ CustomElementRegistry::WhenDefined(const nsAString& aName, ErrorResult& aRv)
     return nullptr;
   }
 
-  nsCOMPtr<nsIAtom> nameAtom(NS_Atomize(aName));
+  RefPtr<nsAtom> nameAtom(NS_Atomize(aName));
   if (!nsContentUtils::IsCustomElementName(nameAtom)) {
     promise->MaybeReject(NS_ERROR_DOM_SYNTAX_ERR);
     return promise.forget();
@@ -918,7 +936,7 @@ CustomElementRegistry::Upgrade(Element* aElement,
       mozilla::dom::BorrowedAttrInfo info = aElement->GetAttrInfoAt(i);
 
       const nsAttrName* name = info.mName;
-      nsIAtom* attrName = name->LocalName();
+      nsAtom* attrName = name->LocalName();
 
       if (aDefinition->IsInObservedAttributeList(attrName)) {
         int32_t namespaceID = name->NamespaceID();
@@ -935,7 +953,7 @@ CustomElementRegistry::Upgrade(Element* aElement,
         };
         nsContentUtils::EnqueueLifecycleCallback(nsIDocument::eAttributeChanged,
                                                  aElement,
-                                                 &args, aDefinition);
+                                                 &args, nullptr, aDefinition);
       }
     }
   }
@@ -943,7 +961,7 @@ CustomElementRegistry::Upgrade(Element* aElement,
   // Step 4.
   if (aElement->IsInComposedDoc()) {
     nsContentUtils::EnqueueLifecycleCallback(nsIDocument::eConnected, aElement,
-                                             nullptr, aDefinition);
+      nullptr, nullptr, aDefinition);
   }
 
   // Step 5.
@@ -967,7 +985,8 @@ CustomElementRegistry::Upgrade(Element* aElement,
 
   // This is for old spec.
   nsContentUtils::EnqueueLifecycleCallback(nsIDocument::eCreated,
-                                           aElement, nullptr, aDefinition);
+                                           aElement, nullptr,
+                                           nullptr, aDefinition);
 }
 
 //-----------------------------------------------------
@@ -1150,6 +1169,11 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(CustomElementDefinition)
     cb.NoteXPCOMChild(callbacks->mDisconnectedCallback.Value());
   }
 
+  if (callbacks->mAdoptedCallback.WasPassed()) {
+    NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mCallbacks->mAdoptedCallback");
+    cb.NoteXPCOMChild(callbacks->mAdoptedCallback.Value());
+  }
+
   NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mConstructor");
   cb.NoteXPCOMChild(tmp->mConstructor);
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
@@ -1162,10 +1186,10 @@ NS_IMPL_CYCLE_COLLECTION_ROOT_NATIVE(CustomElementDefinition, AddRef)
 NS_IMPL_CYCLE_COLLECTION_UNROOT_NATIVE(CustomElementDefinition, Release)
 
 
-CustomElementDefinition::CustomElementDefinition(nsIAtom* aType,
-                                                 nsIAtom* aLocalName,
+CustomElementDefinition::CustomElementDefinition(nsAtom* aType,
+                                                 nsAtom* aLocalName,
                                                  Function* aConstructor,
-                                                 nsCOMArray<nsIAtom>&& aObservedAttributes,
+                                                 nsTArray<RefPtr<nsAtom>>&& aObservedAttributes,
                                                  JSObject* aPrototype,
                                                  LifecycleCallbacks* aCallbacks,
                                                  uint32_t aDocOrder)
