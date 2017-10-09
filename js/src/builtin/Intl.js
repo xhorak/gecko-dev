@@ -246,7 +246,7 @@ function getDuplicateVariantRE() {
         // Match everything in a langtag prior to any variants, and maybe some
         // of the variants as well (which makes this pattern inefficient but
         // not wrong, for our purposes);
-        "(?:" + alphanum + "{2,8}-)+" +
+        "^(?:" + alphanum + "{2,8}-)+" +
         // a variant, parenthesised so that we can refer back to it later;
         "(" + variant + ")-" +
         // zero or more subtags at least two characters long (thus stopping
@@ -2370,8 +2370,14 @@ _SetCanonicalName(Intl_NumberFormat_format_get, "get format");
 
 
 function Intl_NumberFormat_formatToParts(value) {
-    // Steps 1-3.
-    var nf = UnwrapNumberFormat(this, "formatToParts");
+    // Step 1.
+    var nf = this;
+
+    // Steps 2-3.
+    if (!IsObject(nf) || !IsNumberFormat(nf)) {
+        ThrowTypeError(JSMSG_INTL_OBJECT_NOT_INITED, "NumberFormat", "formatToParts",
+                       "NumberFormat");
+    }
 
     // Ensure the NumberFormat internals are resolved.
     getNumberFormatInternals(nf);
@@ -3071,8 +3077,14 @@ _SetCanonicalName(Intl_DateTimeFormat_format_get, "get format");
  * Intl.DateTimeFormat.prototype.formatToParts ( date )
  */
 function Intl_DateTimeFormat_formatToParts(date) {
-    // Steps 1-3.
-    var dtf = UnwrapDateTimeFormat(this, "formatToParts");
+    // Step 1.
+    var dtf = this;
+
+    // Steps 2-3.
+    if (!IsObject(dtf) || !IsDateTimeFormat(dtf)) {
+        ThrowTypeError(JSMSG_INTL_OBJECT_NOT_INITED, "DateTimeFormat", "formatToParts",
+                       "DateTimeFormat");
+    }
 
     // Ensure the DateTimeFormat internals are resolved.
     getDateTimeFormatInternals(dtf);

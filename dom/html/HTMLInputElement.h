@@ -193,12 +193,12 @@ public:
   virtual bool IsHTMLFocusable(bool aWithMouse, bool *aIsFocusable, int32_t *aTabIndex) override;
 
   virtual bool ParseAttribute(int32_t aNamespaceID,
-                                nsIAtom* aAttribute,
+                                nsAtom* aAttribute,
                                 const nsAString& aValue,
                                 nsAttrValue& aResult) override;
-  virtual nsChangeHint GetAttributeChangeHint(const nsIAtom* aAttribute,
+  virtual nsChangeHint GetAttributeChangeHint(const nsAtom* aAttribute,
                                               int32_t aModType) const override;
-  NS_IMETHOD_(bool) IsAttributeMapped(const nsIAtom* aAttribute) const override;
+  NS_IMETHOD_(bool) IsAttributeMapped(const nsAtom* aAttribute) const override;
   virtual nsMapRuleToAttributesFunc GetAttributeMappingFunction() const override;
 
   virtual nsresult GetEventTargetParent(
@@ -247,9 +247,7 @@ public:
   NS_IMETHOD_(void) UnbindFromFrame(nsTextControlFrame* aFrame) override;
   NS_IMETHOD CreateEditor() override;
   NS_IMETHOD_(Element*) GetRootEditorNode() override;
-  NS_IMETHOD_(Element*) CreatePlaceholderNode() override;
   NS_IMETHOD_(Element*) GetPlaceholderNode() override;
-  NS_IMETHOD_(Element*) CreatePreviewNode() override;
   NS_IMETHOD_(Element*) GetPreviewNode() override;
   NS_IMETHOD_(void) UpdateOverlayTextVisibility(bool aNotify) override;
   NS_IMETHOD_(void) SetPreviewValue(const nsAString& aValue) override;
@@ -368,7 +366,14 @@ public:
   void     UpdateRangeUnderflowValidityState();
   void     UpdateStepMismatchValidityState();
   void     UpdateBadInputValidityState();
+  // Update all our validity states and then update our element state
+  // as needed.  aNotify controls whether the element state update
+  // needs to notify.
   void     UpdateAllValidityStates(bool aNotify);
+  // Update all our validity states without updating element state.
+  // This should be called instead of UpdateAllValidityStates any time
+  // we're guaranteed that element state will be updated anyway.
+  void     UpdateAllValidityStatesButNotElementState();
   void     UpdateBarredFromConstraintValidation();
   nsresult GetValidationMessage(nsAString& aValidationMessage,
                                 ValidityStateType aType) override;
@@ -1061,13 +1066,13 @@ protected:
   /**
    * Called when an attribute is about to be changed
    */
-  virtual nsresult BeforeSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
+  virtual nsresult BeforeSetAttr(int32_t aNameSpaceID, nsAtom* aName,
                                  const nsAttrValueOrString* aValue,
                                  bool aNotify) override;
   /**
    * Called when an attribute has just been changed
    */
-  virtual nsresult AfterSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
+  virtual nsresult AfterSetAttr(int32_t aNameSpaceID, nsAtom* aName,
                                 const nsAttrValue* aValue,
                                 const nsAttrValue* aOldValue,
                                 bool aNotify) override;

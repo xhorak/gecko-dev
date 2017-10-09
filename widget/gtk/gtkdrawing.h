@@ -305,9 +305,6 @@ typedef enum {
   MOZ_GTK_HEADER_BAR_BUTTON_MINIMIZE,
   MOZ_GTK_HEADER_BAR_BUTTON_MAXIMIZE,
 
-  /* Paints a GtkHeaderBar title button */
-  MOZ_GTK_HEADER_BAR_BUTTON,
-
   MOZ_GTK_WIDGET_NODE_COUNT
 } WidgetNodeType;
 
@@ -572,6 +569,17 @@ void moz_gtk_get_window_border(gint* top, gint* right, gint* bottom, gint* left)
  * Only available on GTK 3.20+.
  */
 void moz_gtk_window_decoration_paint(cairo_t *cr, GdkRectangle* rect);
+
+/**
+ * Gets the border of window header bar, only available on GTK 3.20+.
+ */
+void moz_gtk_get_header_bar_border(gint* top, gint* right, gint* bottom, gint* left);
+
+/**
+ * Draw window header bar, only available on GTK 3.20+.
+ */
+void moz_gtk_header_bar_paint(cairo_t *cr, GdkRectangle* rect);
+
 #endif
 
 /**

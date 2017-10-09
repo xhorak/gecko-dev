@@ -68,8 +68,8 @@ JS::Zone::Zone(JSRuntime* rt, ZoneGroup* group)
 
     AutoLockGC lock(rt);
     threshold.updateAfterGC(8192, GC_NORMAL, rt->gc.tunables, rt->gc.schedulingState, lock);
-    setGCMaxMallocBytes(rt->gc.maxMallocBytesAllocated() * 0.9);
-    jitCodeCounter.setMax(jit::MaxCodeBytesPerProcess * 0.8);
+    setGCMaxMallocBytes(rt->gc.maxMallocBytesAllocated() * 0.9, lock);
+    jitCodeCounter.setMax(jit::MaxCodeBytesPerProcess * 0.8, lock);
 }
 
 Zone::~Zone()
@@ -104,8 +104,6 @@ Zone::init(bool isSystemArg)
 void
 Zone::setNeedsIncrementalBarrier(bool needs)
 {
-    MOZ_ASSERT_IF(needs && isAtomsZone(),
-                  !runtimeFromActiveCooperatingThread()->hasHelperThreadZones());
     MOZ_ASSERT_IF(needs, canCollect());
     needsIncrementalBarrier_ = needs;
 }
@@ -298,15 +296,14 @@ Zone::hasMarkedCompartments()
 bool
 Zone::canCollect()
 {
+    // The atoms zone cannot be collected while off-thread parsing is taking
+    // place.
+    if (isAtomsZone())
+        return !runtimeFromAnyThread()->hasHelperThreadZones();
+
     // Zones that will be or are currently used by other threads cannot be
     // collected.
-    if (!isAtomsZone() && group()->createdForHelperThread())
-        return false;
-
-    JSRuntime* rt = runtimeFromAnyThread();
-    if (isAtomsZone() && rt->hasHelperThreadZones())
-        return false;
-    return true;
+    return !group()->createdForHelperThread();
 }
 
 void

@@ -90,8 +90,8 @@ SVGStyleElement::UnbindFromTree(bool aDeep, bool aNullParent)
 }
 
 nsresult
-SVGStyleElement::SetAttr(int32_t aNameSpaceID, nsIAtom* aName,
-                         nsIAtom* aPrefix, const nsAString& aValue,
+SVGStyleElement::SetAttr(int32_t aNameSpaceID, nsAtom* aName,
+                         nsAtom* aPrefix, const nsAString& aValue,
                          bool aNotify)
 {
   nsresult rv = SVGStyleElementBase::SetAttr(aNameSpaceID, aName, aPrefix,
@@ -111,7 +111,7 @@ SVGStyleElement::SetAttr(int32_t aNameSpaceID, nsIAtom* aName,
 }
 
 nsresult
-SVGStyleElement::UnsetAttr(int32_t aNameSpaceID, nsIAtom* aAttribute,
+SVGStyleElement::UnsetAttr(int32_t aNameSpaceID, nsAtom* aAttribute,
                            bool aNotify)
 {
   nsresult rv = SVGStyleElementBase::UnsetAttr(aNameSpaceID, aAttribute,
@@ -132,7 +132,7 @@ SVGStyleElement::UnsetAttr(int32_t aNameSpaceID, nsIAtom* aAttribute,
 
 bool
 SVGStyleElement::ParseAttribute(int32_t aNamespaceID,
-                                nsIAtom* aAttribute,
+                                nsAtom* aAttribute,
                                 const nsAString& aValue,
                                 nsAttrValue& aResult)
 {
@@ -160,8 +160,7 @@ SVGStyleElement::CharacterDataChanged(nsIDocument* aDocument,
 void
 SVGStyleElement::ContentAppended(nsIDocument* aDocument,
                                  nsIContent* aContainer,
-                                 nsIContent* aFirstNewContent,
-                                 int32_t aNewIndexInContainer)
+                                 nsIContent* aFirstNewContent)
 {
   ContentChanged(aContainer);
 }
@@ -169,8 +168,7 @@ SVGStyleElement::ContentAppended(nsIDocument* aDocument,
 void
 SVGStyleElement::ContentInserted(nsIDocument* aDocument,
                                  nsIContent* aContainer,
-                                 nsIContent* aChild,
-                                 int32_t aIndexInContainer)
+                                 nsIContent* aChild)
 {
   ContentChanged(aChild);
 }
@@ -179,7 +177,6 @@ void
 SVGStyleElement::ContentRemoved(nsIDocument* aDocument,
                                 nsIContent* aContainer,
                                 nsIContent* aChild,
-                                int32_t aIndexInContainer,
                                 nsIContent* aPreviousSibling)
 {
   ContentChanged(aChild);

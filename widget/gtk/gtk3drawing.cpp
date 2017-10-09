@@ -2028,13 +2028,28 @@ moz_gtk_header_bar_paint(WidgetNodeType widgetType,
     GtkStyleContext *style;
 
     style = GetStyleContext(widgetType, GTK_TEXT_DIR_LTR,
-                              state_flags);
+                            state_flags);
     InsetByMargin(rect, style);
     gtk_render_background(style, cr, rect->x, rect->y, rect->width,
                           rect->height);
     gtk_render_frame(style, cr, rect->x, rect->y, rect->width, rect->height);
 
     return MOZ_GTK_SUCCESS;
+}
+
+void
+moz_gtk_header_bar_paint(cairo_t *cr, GdkRectangle* rect)
+{
+    static GtkWidgetState state;
+    moz_gtk_header_bar_paint(MOZ_GTK_HEADER_BAR, cr, rect, &state);
+}
+
+void
+moz_gtk_get_header_bar_border(gint* top, gint* right, gint* bottom, gint* left)
+{
+    *left = *top = *right = *bottom = 0;
+    moz_gtk_add_border_padding(GetStyleContext(MOZ_GTK_HEADER_BAR),
+                               left, top, right, bottom);
 }
 
 static void
@@ -2806,12 +2821,6 @@ moz_gtk_widget_paint(WidgetNodeType widget, cairo_t *cr,
                                     (GtkReliefStyle) flags,
                                     GetWidget(MOZ_GTK_BUTTON),
                                     direction);
-        break;
-    case MOZ_GTK_HEADER_BAR_BUTTON:
-        return moz_gtk_header_bar_button_paint(cr, rect, state,
-                                               (GtkReliefStyle) flags,
-                                               GetWidget(MOZ_GTK_HEADER_BAR_BUTTON),
-                                               direction);
         break;
     case MOZ_GTK_HEADER_BAR_BUTTON_CLOSE:
     case MOZ_GTK_HEADER_BAR_BUTTON_MINIMIZE:

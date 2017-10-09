@@ -35,7 +35,7 @@ public:
 
   // nsIDOMHTMLLinkElement
   NS_DECL_NSIDOMHTMLLINKELEMENT
-
+  NS_IMPL_FROMCONTENT_HTML_WITH_TAG(HTMLLinkElement, link);
   NS_DECL_ADDSIZEOFEXCLUDINGTHIS
 
   void LinkAdded();
@@ -58,10 +58,10 @@ public:
                               bool aCompileEventHandlers) override;
   virtual void UnbindFromTree(bool aDeep = true,
                               bool aNullParent = true) override;
-  virtual nsresult BeforeSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
+  virtual nsresult BeforeSetAttr(int32_t aNameSpaceID, nsAtom* aName,
                                  const nsAttrValueOrString* aValue,
                                  bool aNotify) override;
-  virtual nsresult AfterSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
+  virtual nsresult AfterSetAttr(int32_t aNameSpaceID, nsAtom* aName,
                                 const nsAttrValue* aValue,
                                 const nsAttrValue* aOldValue,
                                 bool aNotify) override;
@@ -70,7 +70,7 @@ public:
 
   // Element
   virtual bool ParseAttribute(int32_t aNamespaceID,
-                              nsIAtom* aAttribute,
+                              nsAtom* aAttribute,
                               const nsAString& aValue,
                               nsAttrValue& aResult) override;
   virtual void GetLinkTarget(nsAString& aTarget) override;

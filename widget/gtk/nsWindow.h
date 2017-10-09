@@ -435,7 +435,7 @@ private:
     void               SetDefaultIcon(void);
     void               InitButtonEvent(mozilla::WidgetMouseEvent& aEvent,
                                        GdkEventButton* aGdkEvent);
-    bool               DispatchCommandEvent(nsIAtom* aCommand);
+    bool               DispatchCommandEvent(nsAtom* aCommand);
     bool               DispatchContentCommandEvent(mozilla::EventMessage aMsg);
     bool               CheckForRollup(gdouble aMouseX, gdouble aMouseY,
                                       bool aIsWheel, bool aAlwaysRollup);
@@ -449,7 +449,7 @@ private:
                                    gint* aRootX, gint* aRootY);
     void               ClearCachedResources();
     nsIWidgetListener* GetListener();
-
+    void               ApplyCSDClipping();
 
     GtkWidget          *mShell;
     MozContainer       *mContainer;
